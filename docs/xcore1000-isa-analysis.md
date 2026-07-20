@@ -397,3 +397,214 @@ LBB2_2:
     snop 2
     endk                          ; kernel done
 ```
+
+---
+
+## 8. Memory Model
+
+### 8.1 Memory Hierarchy
+
+| Level | Address Space | Size | Latency | Scope |
+|-------|--------------|------|---------|-------|
+| Registers | VGPR/SGPR | 32+32 per thread | 1 cycle | Per-thread (VGPR) / Per-warp (SGPR) |
+| Shared Memory (BSM) | `addrspace(3)` | Configurable per block | ~1 cycle | Per-block |
+| Global Memory | `addrspace(1)` | Device DRAM | ~100+ cycles | Device-wide |
+| Kernarg Segment | `addrspace(4)` | ~120 bytes per kernel | ~1 cycle | Per-dispatch |
+| Private/Local | `addrspace(5)` | Per-thread stack | ~10 cycles | Per-thread |
+
+### 8.2 Address Space Mapping
+
+| Address Space | Pointer Size | Usage |
+|--------------|-------------|-------|
+| 0 (generic) | 64-bit | Default |
+| 1 | 64-bit | Global device memory |
+| 2 | 32-bit | — |
+| 3 | 32-bit | Shared memory (BSM) |
+| 4 | 64-bit | Dispatch/implicit arg pointers |
+| 5 | 32-bit | Private/local memory |
+
+### 8.3 Kernel Argument Passing
+
+Kernel arguments are passed via the **kernarg segment** (address space 4). The layout is:
+
+```
+Offset  Size  Description
+0x00    8B    Pointer to arg 0 (global float* / int*)
+0x08    8B    Pointer to arg 1
+0x10    8B    Pointer to arg 2
+...
+0xC0    8B    Hidden: global_offset_x
+0xC8    8B    Hidden: global_offset_y
+0xD0    8B    Hidden: global_offset_z
+...
+```
+
+Loaded via `ldu_b32/ldu_b64/ldu_b128/ldu_b256` instructions from `s0` (kernarg base pointer).
+
+### 8.4 Dispatch Packet Structure
+
+`mxc_kernel_dispatch_packet_s` — 64 bytes, accessed via `@llvm.mxc.dispatch.ptr()`:
+
+```
+Offset  Type    Field
++0      u16     workgroup_size_x (blockDim.x)
++2      u16     workgroup_size_y (blockDim.y)
++4      u16     workgroup_size_z (blockDim.z)
++6      u16     grid_size_x (gridDim.x in workgroups)
++8      u16     grid_size_y
++10     u16     grid_size_z
++12     u32     reserved
++16     u32     reserved
++20     u32     reserved
++24     u32     reserved
++28     u32     reserved
++32     u64     reserved
++40     ptr     kernarg_address
++48     u64     reserved
++56     u64     completion_signal
+```
+
+---
+
+## 9. Calling Convention
+
+### 9.1 Register Assignment
+
+| Register | Purpose | Notes |
+|----------|---------|-------|
+| `r0` | threadIdx.x (hardware) | Set by hardware at kernel entry |
+| `r1`–`r31` | General purpose VGPRs | Allocated by compiler |
+| `s0` | Kernarg segment pointer | Set by hardware |
+| `s1` | Reserved | — |
+| `s2`–`sN` | General purpose SGPRs | Allocated by compiler |
+
+### 9.2 Kernel Entry Sequence
+
+```asm
+; 1. Load kernarg pointers
+ldu_b128 s0, s0, 0x0          ; s0 = kernarg base, load first 4 args
+arrive slcnt(0)                ; wait for kernarg loads
+
+; 2. Compute global thread index
+ldu_b32 s2, s0, 0x10          ; s2 = blockIdx.x (from dispatch ptr)
+ldu_b32 s3, s0, 0x4           ; s3 = blockDim.x (from dispatch ptr)
+smul_i32 s2, s2, s3           ; s2 = blockIdx.x * blockDim.x
+and_b32 r0, 0x3ff, r0         ; r0 = threadIdx.x (10-bit mask)
+add_u32 r0, s2, r0            ; r0 = global thread index
+
+; 3. Bounds check
+ldu_b32 s1, s0, 0x18          ; s1 = n (kernel arg)
+cmp_lt_i32 s0, r0, s1         ; s0 = (idx < n)
+and_xmsk s4, s0               ; set execution mask
+bra_xmskz .Lskip              ; skip if no active lanes
+
+; 4. Kernel body
+...
+
+; 5. Kernel end
+snop 2
+endk
+```
+
+### 9.3 Kernel Descriptor (`.kd`) Structure
+
+Each kernel has a 64-byte descriptor in the `.rodata` section:
+
+```
+Offset  Size  Description
+0x00    4B    Kernel code offset
+0x04    4B    Kernel code size
+0x08    4B    Reserved
+0x0C    4B    Reserved
+0x10    4B    VGPR count (mtreg_size)
+0x14    4B    SGPR count (streg_size)
+0x18    4B    User SGPR count
+0x1C    4B    BSM size
+0x20    4B    Float mode
+0x24    4B    Privilege level
+0x28    4B    Debug mode
+0x2C    4B    IEEE mode
+0x30    4B    Block size hint
+0x34    4B    Reserved
+0x38    4B    Reserved
+0x3C    4B    Reserved
+```
+
+---
+
+## 10. LLVM Intrinsics
+
+### 10.1 Thread/Block Identification
+
+| Intrinsic | Return | Description |
+|-----------|--------|-------------|
+| `@llvm.mxc.thread.id.x()` | i32 | Thread index in block (X) |
+| `@llvm.mxc.thread.id.y()` | i32 | Thread index in block (Y) |
+| `@llvm.mxc.thread.id.z()` | i32 | Thread index in block (Z) |
+| `@llvm.mxc.block.id.x()` | i32 | Block index in grid (X) |
+| `@llvm.mxc.block.id.y()` | i32 | Block index in grid (Y) |
+| `@llvm.mxc.block.id.z()` | i32 | Block index in grid (Z) |
+| `@llvm.mxc.dispatch.ptr()` | ptr addrspace(4) | Pointer to dispatch packet |
+| `@llvm.mxc.implicitarg.ptr()` | ptr addrspace(4) | Pointer to implicit arguments |
+
+### 10.2 Synchronization
+
+| Intrinsic | Signature | Description |
+|-----------|-----------|-------------|
+| `@llvm.mxc.barrier()` | void | Block-level thread barrier |
+| `@llvm.mxc.sleep(i32 immarg)` | void | Sleep for N cycles |
+| `@llvm.mxc.trap(i32 immarg)` | void | Trap/abort |
+
+### 10.3 Warp-Level Operations
+
+| Intrinsic | Signature | Description |
+|-----------|-----------|-------------|
+| `@llvm.mxc.mbcnt.lo(i32, i32)` | i32 | Low warp thread count |
+| `@llvm.mxc.mbcnt.hi(i32, i32)` | i32 | High warp thread count |
+| `@llvm.mxc.bsm.bpermute(i32 idx, i32 val)` | i32 | Warp shuffle (BSM permute) |
+| `@llvm.mxc.icmp.i64.i32(i32, i32, i32 immarg)` | i64 | Warp-wide integer compare + ballot |
+| `@llvm.mxc.fcmp.i64.f32(float, float, i32 immarg)` | i64 | Warp-wide float compare + ballot |
+
+### 10.4 Memory Operations
+
+| Intrinsic | Signature | Description |
+|-----------|-----------|-------------|
+| `@llvm.mxc.is.private(ptr)` | i1 | Check if pointer is in private space |
+| `@llvm.mxc.is.shared(ptr)` | i1 | Check if pointer is in shared space |
+| `@llvm.mxc.alignbyte(i32, i32, i32)` | i32 | Byte alignment computation |
+
+### 10.5 Float Math
+
+| Intrinsic | Signature | Description |
+|-----------|-----------|-------------|
+| `@llvm.mxc.rcp.f32(float)` | float | Reciprocal approximation |
+| `@llvm.mxc.rsq.f32(float)` | float | Reciprocal sqrt approximation |
+| `@llvm.mxc.fma.clamp.f32(float, float, float)` | float | FMA with clamp |
+| `@llvm.mxc.div.scale.f32(float, float, i1)` | {float, i1} | Division scale step |
+| `@llvm.mxc.div.fmas.f32(float, float, float, i1)` | float | Division FMA step |
+| `@llvm.mxc.div.fixup.f32(float, float, float)` | float | Division fixup |
+| `@llvm.mxc.fract.f32(float)` | float | Fractional part |
+| `@llvm.mxc.get.mant.f32(float)` | float | Get mantissa |
+| `@llvm.mxc.get.exp.i32.f32(float)` | i32 | Get exponent |
+| `@llvm.mxc.kindof.f32.i32(float, i32)` | i1 | FP classification |
+
+### 10.6 Type Conversion
+
+| Intrinsic | Signature | Description |
+|-----------|-----------|-------------|
+| `@llvm.mxc.i16tof16(i16)` | half | int16 → float16 |
+| `@llvm.mxc.u16tof16(i16)` | half | uint16 → float16 |
+| `@llvm.mxc.f16toi16(half)` | i16 | float16 → int16 |
+| `@llvm.mxc.f16tou16(half)` | i16 | float16 → uint16 |
+| `@llvm.mxc.cvt.f32tobf16(float)` | i16 | float32 → bfloat16 |
+
+### 10.7 Hardware / Debug
+
+| Intrinsic | Signature | Description |
+|-----------|-----------|-------------|
+| `@llvm.mxc.gethwreg(i32 immarg)` | i32 | Read hardware register |
+| `@llvm.mxc.sethwreg(i32 immarg, i32)` | void | Write hardware register |
+| `@llvm.mxc.gettime()` | i64 | Get timer value |
+| `@llvm.mxc.getrealtime()` | i64 | Get real-time clock |
+| `@llvm.mxc.msg(i32 immarg, i32)` | void | Send message |
+| `@llvm.mxc.init.debug.buffer(i32 immarg)` | void | Initialize debug buffer |
