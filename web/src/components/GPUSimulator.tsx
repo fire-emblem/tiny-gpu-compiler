@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { TinyGPUSim } from '../simulator/TinyGPUSim';
-import { Instruction, SimulationState, PipelineStage } from '../compiler/types';
+import { XCore1000Sim, XCore1000SimulationState } from '../simulator/XCore1000Sim';
+import { Instruction, SimulationState, TargetArch, PipelineStage } from '../compiler/types';
 
 interface GPUSimulatorProps {
   instructions: Instruction[];
@@ -8,6 +9,8 @@ interface GPUSimulatorProps {
   numBlocks: number;
   threadsPerBlock: number;
   onCycleChange?: (state: SimulationState) => void;
+  target?: TargetArch;
+  assembly?: string;
 }
 
 const STAGE_COLORS: Record<string, string> = {
@@ -27,8 +30,11 @@ export function GPUSimulator({
   numBlocks,
   threadsPerBlock,
   onCycleChange,
+  target,
+  assembly,
 }: GPUSimulatorProps) {
   const [history, setHistory] = useState<SimulationState[]>([]);
+  const [xcoreHistory, setXcoreHistory] = useState<XCore1000SimulationState[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(500);
@@ -36,26 +42,66 @@ export function GPUSimulator({
   const intervalRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (instructions.length === 0) return;
-    const sim = new TinyGPUSim(instructions, initialMemory, numBlocks, threadsPerBlock);
-    const allStates = sim.runToEnd(5000);
-    setHistory(allStates);
-    setCurrentStep(0);
-    setIsPlaying(false);
-    setSelectedThread(null);
-  }, [instructions, initialMemory, numBlocks, threadsPerBlock]);
+    if (target === 'xcore1000' && assembly) {
+      // xcore1000 simulation mode
+      const memory = new Float32Array(1024);
+      for (let i = 0; i < initialMemory.length && i < memory.length; i++) {
+        memory[i] = initialMemory[i];
+      }
+      const sim = new XCore1000Sim(assembly, memory, numBlocks, threadsPerBlock);
+      const allStates = sim.runToEnd(5000);
+      setXcoreHistory(allStates);
+      setHistory([]); // Clear tiny-gpu history
+      setCurrentStep(0);
+      setIsPlaying(false);
+      setSelectedThread(null);
+    } else if (instructions.length > 0) {
+      // tiny-gpu simulation mode
+      const sim = new TinyGPUSim(instructions, initialMemory, numBlocks, threadsPerBlock);
+      const allStates = sim.runToEnd(5000);
+      setHistory(allStates);
+      setXcoreHistory([]);
+      setCurrentStep(0);
+      setIsPlaying(false);
+      setSelectedThread(null);
+    }
+  }, [instructions, initialMemory, numBlocks, threadsPerBlock, target, assembly]);
 
-  const state = history[currentStep];
+  const isXCore = target === 'xcore1000' && xcoreHistory.length > 0;
+  const state = isXCore ? null : history[currentStep];
+  const xcoreState = isXCore ? xcoreHistory[currentStep] : null;
+
+  // Convert xcore1000 state to compatible format for display
+  const displayState = state || (xcoreState ? {
+    cycle: xcoreState.cycle,
+    threads: xcoreState.threads.map(t => ({
+      threadId: t.threadId,
+      blockId: t.blockId,
+      pc: t.pc,
+      registers: Array.from(t.vgprs).slice(0, 16),
+      nzp: 0,
+      stage: t.done ? PipelineStage.DONE : PipelineStage.EXECUTE,
+      done: t.done,
+      currentInstruction: t.currentInstruction,
+      divergent: t.divergent,
+    })),
+    memory: Array.from(xcoreState.globalMemory).slice(0, 256).map(v => Math.round(v)),
+    sharedMemory: Array.from(xcoreState.sharedMemory).slice(0, 64).map(v => Math.round(v)),
+    currentBlock: xcoreState.currentBlock,
+    totalBlocks: xcoreState.totalBlocks,
+  } : null);
+
+  const effectiveHistory = isXCore ? xcoreHistory : history;
 
   useEffect(() => {
-    if (state && onCycleChange) onCycleChange(state);
-  }, [currentStep, state, onCycleChange]);
+    if (state && onCycleChange) onCycleChange(displayState);
+  }, [currentStep, displayState, onCycleChange]);
 
   useEffect(() => {
-    if (isPlaying && history.length > 0) {
+    if (isPlaying && effectiveHistory.length > 0) {
       intervalRef.current = window.setInterval(() => {
         setCurrentStep((prev) => {
-          if (prev >= history.length - 1) {
+          if (prev >= effectiveHistory.length - 1) {
             setIsPlaying(false);
             return prev;
           }
@@ -66,11 +112,11 @@ export function GPUSimulator({
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isPlaying, speed, history.length]);
+  }, [isPlaying, speed, effectiveHistory.length]);
 
   const stepForward = useCallback(() => {
-    setCurrentStep((prev) => Math.min(prev + 1, history.length - 1));
-  }, [history.length]);
+    setCurrentStep((prev) => Math.min(prev + 1, effectiveHistory.length - 1));
+  }, [effectiveHistory.length]);
 
   const stepBackward = useCallback(() => {
     setCurrentStep((prev) => Math.max(prev - 1, 0));
@@ -82,11 +128,11 @@ export function GPUSimulator({
   }, []);
 
   const jumpToEnd = useCallback(() => {
-    setCurrentStep(history.length - 1);
+    setCurrentStep(effectiveHistory.length - 1);
     setIsPlaying(false);
-  }, [history.length]);
+  }, [effectiveHistory.length]);
 
-  if (!state || instructions.length === 0) {
+  if (!displayState || (instructions.length === 0 && !assembly)) {
     return (
       <div style={{ padding: '16px', color: '#666', fontSize: '13px' }}>
         Compile a kernel to start the GPU simulator.
@@ -95,7 +141,7 @@ export function GPUSimulator({
   }
 
   const selectedThreadState = selectedThread !== null
-    ? state.threads.find(t => t.threadId === selectedThread)
+    ? displayState.threads.find(t => t.threadId === selectedThread)
     : null;
 
   return (
@@ -149,7 +195,7 @@ export function GPUSimulator({
         </label>
 
         <span style={{ fontSize: '11px', color: '#4ec9b0', fontFamily: 'monospace' }}>
-          Cycle {state.cycle} / {history.length - 1}
+          Cycle {displayState.cycle} / {effectiveHistory.length - 1}
         </span>
       </div>
 
@@ -157,7 +203,7 @@ export function GPUSimulator({
       <input
         type="range"
         min={0}
-        max={history.length - 1}
+        max={effectiveHistory.length - 1}
         value={currentStep}
         onChange={(e) => {
           setCurrentStep(parseInt(e.target.value));
@@ -168,11 +214,11 @@ export function GPUSimulator({
 
       {/* Block info + divergence indicator */}
       <div style={{ fontSize: '11px', color: '#888', padding: '0 4px', flexShrink: 0, display: 'flex', gap: '8px', alignItems: 'center' }}>
-        <span>Block {state.currentBlock} / {state.totalBlocks}</span>
-        {state.currentBlock >= state.totalBlocks && (
+        <span>Block {displayState.currentBlock} / {displayState.totalBlocks}</span>
+        {displayState.currentBlock >= displayState.totalBlocks && (
           <span style={{ color: '#4ec9b0' }}>DONE</span>
         )}
-        {state.threads.some(t => t.divergent) && (
+        {displayState.threads.some(t => t.divergent) && (
           <span style={{
             color: '#e06c75',
             padding: '1px 6px',
@@ -184,7 +230,7 @@ export function GPUSimulator({
             DIVERGENT
           </span>
         )}
-        {state.threads.some(t => t.stage === PipelineStage.BARRIER) && (
+        {displayState.threads.some(t => t.stage === PipelineStage.BARRIER) && (
           <span style={{
             color: '#4ec9b0',
             padding: '1px 6px',
@@ -208,7 +254,7 @@ export function GPUSimulator({
             padding: '4px',
           }}
         >
-          {state.threads.map((thread) => (
+          {displayState.threads.map((thread) => (
             <ThreadCard
               key={`${thread.blockId}-${thread.threadId}`}
               thread={thread}
@@ -266,17 +312,17 @@ export function GPUSimulator({
           <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>
             Data Memory (256 bytes)
           </div>
-          <MemoryHeatmap memory={state.memory} />
+          <MemoryHeatmap memory={displayState.memory} />
         </div>
 
         {/* Shared Memory visualization */}
-        {state.sharedMemory.some(v => v !== 0) && (
+        {displayState.sharedMemory.some(v => v !== 0) && (
           <div style={{ marginTop: '8px', padding: '4px' }}>
             <div style={{ fontSize: '11px', color: '#4ec9b0', marginBottom: '4px' }}>
               Shared Memory (64 bytes)
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1px' }}>
-              {state.sharedMemory.slice(0, 32).map((val, i) => (
+              {displayState.sharedMemory.slice(0, 32).map((val, i) => (
                 <div
                   key={i}
                   style={{

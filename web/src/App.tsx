@@ -308,6 +308,8 @@ export default function App() {
                 numBlocks={example.numBlocks}
                 threadsPerBlock={example.threadsPerBlock}
                 onCycleChange={handleCycleChange}
+                target={target}
+                assembly={target === 'xcore1000' ? (trace as any).assembly : undefined}
               />
             ) : (
               <AnalysisPanel analysis={trace.analysis} />
