@@ -125,9 +125,10 @@ private:
         return failure();
     }
 
-    // Add return if not already terminated
-    if (entryBlock->empty() ||
-        !entryBlock->back().hasTrait<OpTrait::IsTerminator>()) {
+    // Add return to the current insertion point if not already terminated
+    Block *currentBlock = builder.getBlock();
+    if (currentBlock->empty() ||
+        !currentBlock->back().hasTrait<OpTrait::IsTerminator>()) {
       builder.create<tinygpu::ReturnOp>(loc(kernel.loc));
     }
 
@@ -275,9 +276,9 @@ private:
     // For simplicity: branch to body if condVal indicates the comparison is true.
     auto zeroConst = builder.create<tinygpu::ConstOp>(loc(stmt.loc), (uint8_t)0);
     auto nzp = builder.create<tinygpu::CmpOp>(loc(stmt.loc), condVal, zeroConst);
-    // Branch if positive (condition was nonzero = true)
+    // Branch if positive (condition was nonzero = true), else exit
     builder.create<tinygpu::BranchOp>(loc(stmt.loc), nzp, (uint8_t)0b001,
-                                       bodyBlock);
+                                       bodyBlock, exitBlock);
 
     // Body block
     builder.setInsertionPointToStart(bodyBlock);
@@ -318,11 +319,14 @@ private:
     }
     parentOp->push_back(mergeBlock);
 
-    // Branch on condition
+    // Compare condition with zero
     auto zeroConst = builder.create<tinygpu::ConstOp>(loc(stmt.loc), (uint8_t)0);
     auto nzp = builder.create<tinygpu::CmpOp>(loc(stmt.loc), condVal, zeroConst);
+
+    // Branch: if (nzp & 0b001) != 0 → thenBlock, else → falseDest
+    Block *falseDest = elseBlock ? elseBlock : mergeBlock;
     builder.create<tinygpu::BranchOp>(loc(stmt.loc), nzp, (uint8_t)0b001,
-                                       thenBlock);
+                                       thenBlock, falseDest);
 
     // Then block
     builder.setInsertionPointToStart(thenBlock);

@@ -223,13 +223,13 @@ def TinyGPU_CmpOp : TinyGPU_Op<"cmp", [Pure]> {
 def TinyGPU_BranchOp : TinyGPU_Op<"branch", [Terminator]> {
   let summary = "Conditional branch based on NZP flags";
   let description = [{
-    Branches to `target` block if (nzp_reg & condition_mask) != 0.
-    The condition_mask is a 3-bit value selecting which NZP flags to test.
+    Branches to `trueDest` if (nzp_reg & condition_mask) != 0,
+    otherwise branches to `falseDest`.
     Maps to the BRnzp instruction.
   }];
   let arguments = (ins I8:$nzp, I8Attr:$condition_mask);
-  let successors = (successor AnySuccessor:$target);
-  let assemblyFormat = "$nzp `,` $condition_mask `,` $target attr-dict";
+  let successors = (successor AnySuccessor:$trueDest, AnySuccessor:$falseDest);
+  let assemblyFormat = "$nzp `,` $condition_mask `,` $trueDest `,` $falseDest attr-dict";
 }
 
 //===----------------------------------------------------------------------===//

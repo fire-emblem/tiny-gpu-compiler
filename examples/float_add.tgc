@@ -1,0 +1,6 @@
+// float_add.tgc — Integer vector addition (int-only, float not yet supported)
+
+kernel float_add(global int* a, global int* b, global int* c) {
+    int idx = blockIdx * blockDim + threadIdx;
+    c[idx] = a[idx] + b[idx];
+}

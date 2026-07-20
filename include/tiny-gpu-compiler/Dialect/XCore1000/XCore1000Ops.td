@@ -406,8 +406,8 @@ def XCore_CselOp : XCore_Op<"csel", [Pure]> {
 def XCore_BranchOp : XCore_Op<"branch", [Terminator]> {
   let summary = "Conditional branch based on scalar flag";
   let arguments = (ins I1:$condition);
-  let successors = (successor AnySuccessor:$target);
-  let assemblyFormat = "$condition `,` $target attr-dict";
+  let successors = (successor AnySuccessor:$trueDest, AnySuccessor:$falseDest);
+  let assemblyFormat = "$condition `,` $trueDest `,` $falseDest attr-dict";
 }
 
 def XCore_JumpOp : XCore_Op<"jump", [Terminator]> {

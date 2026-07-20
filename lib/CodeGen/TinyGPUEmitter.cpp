@@ -146,12 +146,22 @@ std::vector<Instruction> emitBinary(Operation *funcOp) {
         addr++;
       } else if (auto branchOp = dyn_cast<tinygpu::BranchOp>(&op)) {
         int nzp = branchOp.getConditionMask();
-        Block *target = branchOp.getTarget();
-        int targetAddr = blockAddresses.lookup(target);
-        inst.binary = encodeBranch(Opcode::BRnzp, nzp, targetAddr);
+        // True branch
+        Block *trueTarget = branchOp.getTrueDest();
+        int trueAddr = blockAddresses.lookup(trueTarget);
+        inst.binary = encodeBranch(Opcode::BRnzp, nzp, trueAddr);
         inst.assembly =
-            "BRnzp " + std::to_string(nzp) + ", #" + std::to_string(targetAddr);
+            "BRnzp " + std::to_string(nzp) + ", #" + std::to_string(trueAddr);
         instructions.push_back(inst);
+        addr++;
+        // False branch (unconditional jump to falseDest)
+        Block *falseTarget = branchOp.getFalseDest();
+        int falseAddr = blockAddresses.lookup(falseTarget);
+        Instruction jmpInst;
+        jmpInst.address = addr;
+        jmpInst.binary = encodeBranch(Opcode::BRnzp, 0b111, falseAddr);
+        jmpInst.assembly = "JMP #" + std::to_string(falseAddr);
+        instructions.push_back(jmpInst);
         addr++;
       } else if (auto jumpOp = dyn_cast<tinygpu::JumpOp>(&op)) {
         // Unconditional jump = BRnzp with mask 0b111 (always taken)

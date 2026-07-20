@@ -1,12 +1,7 @@
-// relu.tgc -- ReLU activation function
-// Applies max(0, x) to each element. A fundamental building block
-// in neural network inference.
-//
-// Memory layout:
-//   input:  addresses 0-63
-//   output: addresses 64-127
+// relu.tgc — ReLU activation function
+// Tests conditional branching (if/else)
 
-kernel relu(global int* input, global int* output) {
+kernel relu(global int* output, global int* input) {
     int idx = blockIdx * blockDim + threadIdx;
     int val = input[idx];
     if (val > 0) {
