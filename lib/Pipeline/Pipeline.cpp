@@ -12,6 +12,7 @@
 #include "tiny-gpu-compiler/Frontend/Parser.h"
 #include "tiny-gpu-compiler/Passes/Passes.h"
 #include "tiny-gpu-compiler/Passes/XCore1000Lowering.h"
+#include "tiny-gpu-compiler/Passes/XCore1000ToLLVM.h"
 
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Verifier.h"
@@ -263,9 +264,20 @@ static CompilationTrace compileXCore1000(const std::string &source,
 
   trace.irStages.push_back({"xcore1000 Register Allocation", captureIR(*module)});
 
-  // Stage 4: xcore1000 Assembly Emission
-  // Emit from the lowered XCore1000 dialect module.
-  if (opts.format == OutputFormat::Assembly ||
+  // Stage 4: Output
+  if (opts.format == OutputFormat::Bitcode) {
+    // Lower XCore1000 → LLVM dialect, then emit LLVM IR bitcode
+    if (!lowerXCore1000ToLLVM(*module)) {
+      llvm::errs() << "XCore1000 → LLVM lowering failed\n";
+      return trace;
+    }
+    trace.irStages.push_back(
+        {"XCore1000 \xe2\x86\x92 LLVM Dialect", captureIR(*module)});
+    if (!emitLLVMBitcode(*module, os)) {
+      llvm::errs() << "LLVM bitcode emission failed\n";
+      return trace;
+    }
+  } else if (opts.format == OutputFormat::Assembly ||
       opts.format == OutputFormat::Hex) {
     emitXCore1000FullAssembly(*module, os);
   } else if (opts.format == OutputFormat::JsonTrace) {

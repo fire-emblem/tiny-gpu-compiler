@@ -14,6 +14,7 @@ enum class OutputFormat {
   Assembly,   // Human-readable annotated assembly
   Hex,        // Hex text (one instruction per line)
   Binary,     // Raw binary
+  Bitcode,    // LLVM IR bitcode (for mxcc compilation)
   JsonTrace,  // Full compilation trace for visualizer
 };
 
