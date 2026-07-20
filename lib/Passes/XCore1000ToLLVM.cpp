@@ -73,8 +73,8 @@ bool lowerXCore1000ToLLVM(ModuleOp module) {
         builder.getStringAttr("nounwind"),
     }));
 
-    // Create entry block
-    Block *entryBlock = &llvmFunc.getBody().front();
+    // Create entry block (LLVMFuncOp doesn't auto-create one)
+    Block *entryBlock = llvmFunc.addEntryBlock();
     builder.setInsertionPointToStart(entryBlock);
 
     // Pre-declare intrinsics

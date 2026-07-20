@@ -14,6 +14,7 @@
 #include "tiny-gpu-compiler/Passes/XCore1000Lowering.h"
 #include "tiny-gpu-compiler/Passes/XCore1000ToLLVM.h"
 
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Verifier.h"
 
@@ -201,6 +202,7 @@ static CompilationTrace compileXCore1000(const std::string &source,
   MLIRContext context;
   context.getOrLoadDialect<tinygpu::TinyGPUDialect>();
   context.getOrLoadDialect<xcore::XCore1000Dialect>();
+  context.getOrLoadDialect<LLVM::LLVMDialect>();
 
   // Stage 1: Frontend — Parse .tgc source to AST
   Lexer lexer(source);
@@ -276,6 +278,80 @@ static CompilationTrace compileXCore1000(const std::string &source,
       llvm::errs() << "LLVM bitcode emission failed\n";
       return trace;
     }
+  } else if (opts.format == OutputFormat::CUDA) {
+    // Transpile .tgc DSL to CUDA source for mxcc compilation
+    std::string cuda = source;
+
+    // "kernel name(...)" → "__global__ void name(...)"
+    {
+      size_t pos = 0;
+      while ((pos = cuda.find("kernel ", pos)) != std::string::npos) {
+        cuda.replace(pos, 7, "__global__ void ");
+        pos += 16;
+      }
+    }
+
+    // "global int*" → "int*" (remove global qualifier)
+    {
+      size_t pos = 0;
+      while ((pos = cuda.find("global ", pos)) != std::string::npos) {
+        cuda.erase(pos, 7);
+      }
+    }
+
+    // "shared int" → "__shared__ int"
+    {
+      size_t pos = 0;
+      while ((pos = cuda.find("shared ", pos)) != std::string::npos) {
+        cuda.replace(pos, 7, "__shared__ ");
+        pos += 11;
+      }
+    }
+
+    // "threadIdx" → "threadIdx.x"
+    {
+      size_t pos = 0;
+      while ((pos = cuda.find("threadIdx", pos)) != std::string::npos) {
+        // Only replace if not already threadIdx.x
+        if (pos + 9 >= cuda.size() || cuda[pos + 9] != '.') {
+          cuda.replace(pos, 9, "threadIdx.x");
+          pos += 11;
+        } else {
+          pos += 10;
+        }
+      }
+    }
+
+    // "blockIdx" → "blockIdx.x"
+    {
+      size_t pos = 0;
+      while ((pos = cuda.find("blockIdx", pos)) != std::string::npos) {
+        if (pos + 8 >= cuda.size() || cuda[pos + 8] != '.') {
+          cuda.replace(pos, 8, "blockIdx.x");
+          pos += 10;
+        } else {
+          pos += 9;
+        }
+      }
+    }
+
+    // "blockDim" → "blockDim.x"
+    {
+      size_t pos = 0;
+      while ((pos = cuda.find("blockDim", pos)) != std::string::npos) {
+        if (pos + 8 >= cuda.size() || cuda[pos + 8] != '.') {
+          cuda.replace(pos, 8, "blockDim.x");
+          pos += 10;
+        } else {
+          pos += 9;
+        }
+      }
+    }
+
+    os << "// Auto-generated CUDA source from tgc --target xcore1000\n";
+    os << "// Compile:  mxcc output.cu -o kernel --maca-path=/opt/maca\n";
+    os << "// Run:      MACA_VISIBLE_DEVICES=1 ./kernel\n\n";
+    os << cuda;
   } else if (opts.format == OutputFormat::Assembly ||
       opts.format == OutputFormat::Hex) {
     emitXCore1000FullAssembly(*module, os);

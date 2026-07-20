@@ -25,7 +25,9 @@ static cl::opt<tgc::OutputFormat> emitFormat(
                    "Hex text (one instruction per line)"),
         clEnumValN(tgc::OutputFormat::Binary, "bin", "Raw binary"),
         clEnumValN(tgc::OutputFormat::Bitcode, "bc",
-                   "LLVM IR bitcode (for mxcc GPU compilation)"),
+                   "LLVM IR text (for mxcc GPU compilation)"),
+        clEnumValN(tgc::OutputFormat::CUDA, "cu",
+                   "CUDA source (for mxcc compilation and GPU execution)"),
         clEnumValN(tgc::OutputFormat::JsonTrace, "trace",
                    "JSON trace for web visualizer")),
     cl::init(tgc::OutputFormat::Assembly));
