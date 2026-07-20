@@ -30,6 +30,48 @@ Built on [MLIR](https://mlir.llvm.org/) (the compiler infrastructure behind Tens
 - **Interactive Debugger** -- Click any thread to inspect all 16 registers, NZP flags, and PC in real-time
 - **Shared Memory Visualization** -- Watch the 64-byte scratchpad update live during simulation
 - **3 New ISA Instructions** -- `SLDR` (shared load), `SSTR` (shared store), `BAR` (barrier)
+- **MetaX xcore1000 Backend** -- Compile `.tgc` kernels to MetaX C500 GPU assembly and run on real hardware
+
+---
+
+## MetaX xcore1000 Backend
+
+The compiler now supports a second backend targeting the **MetaX C500 GPU** (xcore1000 architecture). This enables compiling `.tgc` kernels and running them on real GPU hardware.
+
+```bash
+# Compile to xcore1000 assembly
+tgc --target xcore1000 --emit asm examples/vector_add.tgc
+
+# Compile to CUDA source (for mxcc GPU compilation)
+tgc --target xcore1000 --emit cu examples/vector_add.tgc > kernel.cu
+mxcc kernel.cu -o kernel --maca-path=/opt/maca
+MACA_VISIBLE_DEVICES=1 ./kernel
+```
+
+### xcore1000 Architecture
+
+| Property | Value |
+|----------|-------|
+| Target triple | `mxc-metax-macahca` |
+| Base ISA | Synopsys ARCv2.3 64-bit (GPU extended) |
+| Warp size | **64 threads** |
+| Max block size | 512 threads |
+| Instruction width | 32-bit fixed |
+| Register classes | VGPR (r0-r31) + SGPR (s0-s31) |
+| Float support | IEEE754 f32 (multi-step division) |
+
+### Key xcore1000 Instructions
+
+| Category | Instructions |
+|----------|-------------|
+| Integer | `add_u32`, `sub_u32`, `mul_u32`, `mad_i32` |
+| Float | `add_f32`, `mul_f32`, `fma_f32`, `div_scale_f32` |
+| Memory | `ldg_b32` (global load), `stg_b32 devc` (global store), `lds_b32`/`sts_b32` (shared) |
+| Control | `bra`, `bra_xmskz`, `cmp_lt_i32`, `csel_b32` |
+| Sync | `barrier`, `arrive slcnt/gvmcnt/bsmcnt`, `endk` |
+| Warp | `mbcnt_lo_b32`, `mbcnt_hi_b32`, `sm_bperm_b32` (shuffle) |
+
+For the full ISA reference, see [docs/xcore1000-isa-analysis.md](docs/xcore1000-isa-analysis.md).
 
 ---
 
