@@ -268,15 +268,15 @@ private:
     if (!condVal)
       return failure();
 
-    // The condition expression should produce an NZP-like value.
-    // For comparisons, the cmp result is already NZP.
-    // Branch to body if condition is true (positive), exit otherwise.
-    // We use condition_mask = 0b101 (N or P, i.e., not zero) for "not equal"
-    // or 0b001 (P only) for "less than result is positive meaning lhs > rhs"
-    // For simplicity: branch to body if condVal indicates the comparison is true.
-    auto zeroConst = builder.create<tinygpu::ConstOp>(loc(stmt.loc), (uint8_t)0);
-    auto nzp = builder.create<tinygpu::CmpOp>(loc(stmt.loc), condVal, zeroConst);
-    // Branch if positive (condition was nonzero = true), else exit
+    // If condition is already a CmpOp result, use it directly.
+    Value nzp;
+    if (auto cmpDefiningOp = condVal.getDefiningOp();
+        cmpDefiningOp && isa<tinygpu::CmpOp>(cmpDefiningOp)) {
+      nzp = condVal;
+    } else {
+      auto zeroConst = builder.create<tinygpu::ConstOp>(loc(stmt.loc), (uint8_t)0);
+      nzp = builder.create<tinygpu::CmpOp>(loc(stmt.loc), condVal, zeroConst);
+    }
     builder.create<tinygpu::BranchOp>(loc(stmt.loc), nzp, (uint8_t)0b001,
                                        bodyBlock, exitBlock);
 
@@ -319,9 +319,16 @@ private:
     }
     parentOp->push_back(mergeBlock);
 
-    // Compare condition with zero
-    auto zeroConst = builder.create<tinygpu::ConstOp>(loc(stmt.loc), (uint8_t)0);
-    auto nzp = builder.create<tinygpu::CmpOp>(loc(stmt.loc), condVal, zeroConst);
+    // If condition is already a CmpOp result, use it directly.
+    // Otherwise, compare with zero.
+    Value nzp;
+    if (auto cmpDefiningOp = condVal.getDefiningOp();
+        cmpDefiningOp && isa<tinygpu::CmpOp>(cmpDefiningOp)) {
+      nzp = condVal;
+    } else {
+      auto zeroConst = builder.create<tinygpu::ConstOp>(loc(stmt.loc), (uint8_t)0);
+      nzp = builder.create<tinygpu::CmpOp>(loc(stmt.loc), condVal, zeroConst);
+    }
 
     // Branch: if (nzp & 0b001) != 0 → thenBlock, else → falseDest
     Block *falseDest = elseBlock ? elseBlock : mergeBlock;
