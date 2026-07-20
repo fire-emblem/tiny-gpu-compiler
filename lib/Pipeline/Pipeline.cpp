@@ -10,6 +10,7 @@
 #include "tiny-gpu-compiler/Frontend/MLIRGen.h"
 #include "tiny-gpu-compiler/Frontend/Parser.h"
 #include "tiny-gpu-compiler/Passes/Passes.h"
+#include "tiny-gpu-compiler/Passes/XCore1000Lowering.h"
 
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Verifier.h"
@@ -196,13 +197,9 @@ static CompilationTrace compileXCore1000(const std::string &source,
   CompilationTrace trace;
   trace.sourceCode = source;
 
-  // For xcore1000, we use the TinyGPU frontend but emit xcore1000 assembly.
-  // The MLIRGen produces TinyGPU dialect ops, which we then interpret as
-  // xcore1000 operations during emission. A full implementation would lower
-  // TinyGPU → XCore1000 dialect first, but for now we emit directly.
-
   MLIRContext context;
   context.getOrLoadDialect<tinygpu::TinyGPUDialect>();
+  context.getOrLoadDialect<xcore::XCore1000Dialect>();
 
   // Stage 1: Frontend — Parse .tgc source to AST
   Lexer lexer(source);
@@ -224,7 +221,7 @@ static CompilationTrace compileXCore1000(const std::string &source,
     return trace;
   }
 
-  // Stage 2.5: Optimization Passes
+  // Stage 2.5: Optimization Passes (on TinyGPU dialect)
   OptimizationStats optStats;
   for (auto &op : module->getBody()->getOperations()) {
     if (isa<tinygpu::FuncOp>(&op)) {
@@ -236,21 +233,17 @@ static CompilationTrace compileXCore1000(const std::string &source,
       {"Optimization Passes", captureIR(*module)});
   trace.analysis.optimizationSummary = optStats.summary();
 
-  // Stage 3: Register Allocation (TinyGPU register model)
-  for (auto &op : module->getBody()->getOperations()) {
-    if (isa<tinygpu::FuncOp>(&op)) {
-      if (failed(allocateRegisters(&op))) {
-        llvm::errs() << "Register allocation failed\n";
-        return trace;
-      }
-    }
+  // Stage 3: Lower TinyGPU → XCore1000 dialect
+  if (!lowerTinyGPUToXCore1000(*module)) {
+    llvm::errs() << "TinyGPU → XCore1000 lowering failed\n";
+    return trace;
   }
 
-  trace.irStages.push_back({"Register Allocation", captureIR(*module)});
+  trace.irStages.push_back(
+      {"Lowering: TinyGPU \xe2\x86\x92 XCore1000", captureIR(*module)});
 
   // Stage 4: xcore1000 Assembly Emission
-  // We walk the TinyGPU ops and emit xcore1000 assembly directly.
-  // This is a transpilation layer: TinyGPU semantics → xcore1000 instructions.
+  // Emit from the lowered XCore1000 dialect module.
   if (opts.format == OutputFormat::Assembly ||
       opts.format == OutputFormat::Hex) {
     emitXCore1000FullAssembly(*module, os);
