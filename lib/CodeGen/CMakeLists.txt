@@ -2,6 +2,7 @@ add_mlir_library(TGCCodeGen
   RegisterAllocator.cpp
   TinyGPUEmitter.cpp
   XCore1000Emitter.cpp
+  XCore1000RegAlloc.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${PROJECT_SOURCE_DIR}/include/tiny-gpu-compiler/CodeGen

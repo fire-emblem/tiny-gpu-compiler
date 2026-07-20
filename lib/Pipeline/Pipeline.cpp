@@ -2,6 +2,7 @@
 #include "tiny-gpu-compiler/CodeGen/RegisterAllocator.h"
 #include "tiny-gpu-compiler/CodeGen/TinyGPUEmitter.h"
 #include "tiny-gpu-compiler/CodeGen/XCore1000Emitter.h"
+#include "tiny-gpu-compiler/CodeGen/XCore1000RegAlloc.h"
 #include "tiny-gpu-compiler/Dialect/TinyGPU/TinyGPUDialect.h"
 #include "tiny-gpu-compiler/Dialect/TinyGPU/TinyGPUOps.h"
 #include "tiny-gpu-compiler/Dialect/XCore1000/XCore1000Dialect.h"
@@ -241,6 +242,26 @@ static CompilationTrace compileXCore1000(const std::string &source,
 
   trace.irStages.push_back(
       {"Lowering: TinyGPU \xe2\x86\x92 XCore1000", captureIR(*module)});
+
+  // Stage 3.5: xcore1000 Register Allocation (VGPR/SGPR dual-class)
+  for (auto &op : module->getBody()->getOperations()) {
+    if (isa<xcore::FuncOp>(&op)) {
+      if (!allocateXCore1000Registers(&op)) {
+        llvm::errs() << "xcore1000 register allocation failed\n";
+        return trace;
+      }
+    }
+  }
+
+  // Report register pressure
+  for (auto &op : module->getBody()->getOperations()) {
+    if (isa<xcore::FuncOp>(&op)) {
+      auto [maxVgpr, maxSgpr] = getXCore1000RegPressure(&op);
+      trace.analysis.registersUsed = maxVgpr + 1;
+    }
+  }
+
+  trace.irStages.push_back({"xcore1000 Register Allocation", captureIR(*module)});
 
   // Stage 4: xcore1000 Assembly Emission
   // Emit from the lowered XCore1000 dialect module.
