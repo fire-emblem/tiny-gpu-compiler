@@ -19,15 +19,28 @@ static XCoreRegClass getRegClassForValue(Value val) {
   if (!defOp)
     return XCoreRegClass::VGPR;
 
-  // SGPR ops: constants, thread/block IDs, comparisons
+  // SGPR ops: constants (shared across warp)
   if (isa<xcore::ConstIOp, xcore::ConstFOp>(defOp))
     return XCoreRegClass::SGPR;
-  if (isa<xcore::ThreadIdOp, xcore::BlockIdOp, xcore::BlockDimOp>(defOp))
-    return XCoreRegClass::VGPR; // Thread ID is per-thread → VGPR
-  if (isa<xcore::CmpIOp, xcore::CmpFOp>(defOp))
-    return XCoreRegClass::SGPR; // Comparison result is scalar flag
 
-  // VGPR ops: arithmetic, memory loads, conversions
+  // Thread/Block IDs are per-thread → VGPR
+  if (isa<xcore::ThreadIdOp, xcore::BlockIdOp, xcore::BlockDimOp>(defOp))
+    return XCoreRegClass::VGPR;
+
+  // Comparison results → SGPR (scalar flags)
+  if (isa<xcore::CmpIOp, xcore::CmpFOp>(defOp))
+    return XCoreRegClass::SGPR;
+
+  // Address computation → SGPR (shared across warp)
+  if (isa<xcore::AddrCalcOp>(defOp))
+    return XCoreRegClass::SGPR;
+
+  // Memory loads → VGPR (per-thread data)
+  if (isa<xcore::LoadGlobalOp, xcore::LoadGlobalFOp,
+          xcore::LoadSharedOp, xcore::LoadSharedFOp>(defOp))
+    return XCoreRegClass::VGPR;
+
+  // Arithmetic, conversions, etc. → VGPR
   return XCoreRegClass::VGPR;
 }
 
