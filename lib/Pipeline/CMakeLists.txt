@@ -7,6 +7,7 @@ add_mlir_library(TGCPipeline
   LINK_LIBS PUBLIC
   MLIRIR
   TinyGPUDialect
+  XCore1000Dialect
   TGCFrontend
   TGCCodeGen
 )

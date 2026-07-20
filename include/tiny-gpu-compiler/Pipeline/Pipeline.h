@@ -10,15 +10,21 @@
 namespace tgc {
 
 enum class OutputFormat {
-  MLIR,       // Dump the TinyGPU dialect MLIR
+  MLIR,       // Dump the dialect MLIR
   Assembly,   // Human-readable annotated assembly
   Hex,        // Hex text (one instruction per line)
   Binary,     // Raw binary
   JsonTrace,  // Full compilation trace for visualizer
 };
 
+enum class Target {
+  TinyGPU,    // tiny-gpu 16-bit ISA (default)
+  XCore1000,  // MetaX xcore1000 32-bit ISA
+};
+
 struct CompilerOptions {
   OutputFormat format = OutputFormat::Assembly;
+  Target target = Target::TinyGPU;
   bool dumpAfterEachPass = false;
 };
 

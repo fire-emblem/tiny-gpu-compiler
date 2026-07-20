@@ -1,7 +1,7 @@
 // In-browser reimplementation of the C++ compiler pipeline so the web
 // visualizer can compile kernels without a backend.
 
-import { CompilationTrace, Instruction, AnalysisResult, DivergenceInfo, CoalescingInfo } from './types';
+import { CompilationTrace, XCore1000CompilationTrace, Instruction, AnalysisResult, DivergenceInfo, CoalescingInfo, TargetArch } from './types';
 
 // =============================================================================
 // Lexer
@@ -26,7 +26,7 @@ interface Token {
 function lex(source: string): Token[] {
   const tokens: Token[] = [];
   let pos = 0, line = 1, col = 1;
-  const keywords = new Set(['kernel', 'global', 'int', 'for', 'if', 'else', 'shared']);
+  const keywords = new Set(['kernel', 'global', 'int', 'float', 'for', 'if', 'else', 'shared']);
   const builtins = new Set(['threadIdx', 'blockIdx', 'blockDim']);
 
   while (pos < source.length) {
@@ -798,7 +798,10 @@ function analyzeCompilation(
 }
 
 /** Compile a .tgc source string and return the full trace */
-export function compileTGC(source: string): CompilationTrace {
+export function compileTGC(source: string, target: TargetArch = 'tinygpu'): CompilationTrace {
+  if (target === 'xcore1000') {
+    return compileTGCXCore1000(source);
+  }
   try {
     const tokens = lex(source);
     const kernel = parse(tokens);
@@ -821,4 +824,218 @@ export function compileTGC(source: string): CompilationTrace {
       binary: { instructions: [] },
     };
   }
+}
+
+// =============================================================================
+// xcore1000 Backend (in-browser assembly generation)
+// =============================================================================
+
+/** Compile a .tgc kernel to xcore1000 assembly */
+function compileTGCXCore1000(source: string): CompilationTrace {
+  try {
+    const tokens = lex(source);
+    const kernel = parse(tokens);
+    const asmLines = emitXCore1000Assembly(kernel);
+    const assembly = asmLines.join('\n');
+
+    return {
+      source,
+      target: 'xcore1000',
+      stages: [
+        { name: 'Frontend \u2192 AST', ir: JSON.stringify(kernel, null, 2) },
+        { name: 'xcore1000 Assembly', ir: assembly },
+      ],
+      binary: { instructions: [] },
+      analysis: analyzeXCore1000Assembly(asmLines),
+    };
+  } catch (e) {
+    return {
+      source,
+      target: 'xcore1000',
+      stages: [{ name: 'Error', ir: `Compilation error: ${(e as Error).message}` }],
+      binary: { instructions: [] },
+    };
+  }
+}
+
+/** Emit xcore1000 assembly lines from a parsed kernel */
+function emitXCore1000Assembly(kernel: any): string[] {
+  const lines: string[] = [];
+  const params: { name: string; isGlobalPtr: boolean }[] = kernel.params || [];
+
+  // Prologue: kernarg segment load
+  lines.push(`; kernel ${kernel.name}`);
+  lines.push('\tldu_b128 s0, s0, 0x0'); // Load kernarg pointers
+  lines.push('\tarrive slcnt(0)');
+
+  // Thread ID
+  lines.push('\tand_b32 r0, 0x3ff, r0'); // threadIdx.x
+
+  // Compute global thread index: blockIdx.x * blockDim.x + threadIdx.x
+  lines.push('\tldu_b32 s2, s0, 0x10');   // blockIdx.x from dispatch
+  lines.push('\tldu_b32 s3, s0, 0x4');    // blockDim.x from dispatch
+  lines.push('\tsmul_i32 s2, s2, s3');    // s2 = blockIdx.x * blockDim.x
+  lines.push('\tadd_u32 r0, s2, r0');     // r0 = global thread index
+
+  // Load kernel arguments (pointers at s0+0x00, s0+0x08, etc.)
+  let argOffset = 0x0;
+  const ptrRegs: string[] = [];
+  for (const param of params) {
+    if (param.isGlobalPtr) {
+      const reg = `s${4 + ptrRegs.length}`;
+      lines.push(`\tldu_b64 ${reg}, s0, 0x${argOffset.toString(16)}`);
+      ptrRegs.push(reg);
+    }
+    argOffset += 0x8;
+  }
+  lines.push('\tarrive slcnt(0)');
+
+  // Emit kernel body from AST statements
+  for (const stmt of kernel.body || []) {
+    emitXCore1000Stmt(stmt, lines, ptrRegs, params);
+  }
+
+  // Epilogue
+  lines.push('\tsnop 2');
+  lines.push('\tendk');
+
+  return lines;
+}
+
+/** Emit xcore1000 assembly for a single AST statement */
+function emitXCore1000Stmt(stmt: any, lines: string[], ptrRegs: string[], params: any[]): void {
+  if (!stmt) return;
+
+  switch (stmt.kind) {
+    case 'VarDecl': {
+      // int x = expr; \u2192 evaluate expr into a register
+      emitXCore1000Expr(stmt.init, lines, ptrRegs, params);
+      break;
+    }
+    case 'ArrayStore': {
+      // out[idx] = val \u2192 stg_b32
+      const ptrIdx = params.findIndex(p => p.name === stmt.array);
+      if (ptrIdx >= 0 && ptrIdx < ptrRegs.length) {
+        emitXCore1000Expr(stmt.index, lines, ptrRegs, params);
+        emitXCore1000Expr(stmt.value, lines, ptrRegs, params);
+        lines.push(`\tmad_i32 r_addr, r_idx, 4, ${ptrRegs[ptrIdx]}`);
+        lines.push(`\tstg_b32 r_addr, 0x0, r_val devc`);
+      }
+      break;
+    }
+    case 'If': {
+      emitXCore1000Expr(stmt.condition, lines, ptrRegs, params);
+      lines.push('\tcmp_lg_u32 s_cmp, r_cond, 0');
+      lines.push('\tsnop 1');
+      lines.push('\tand_xmsk s_msk, s_cmp');
+      lines.push('\tbra_xmskz .Lskip');
+      for (const s of stmt.thenBody || []) {
+        emitXCore1000Stmt(s, lines, ptrRegs, params);
+      }
+      lines.push('.Lskip:');
+      break;
+    }
+    case 'For': {
+      // Simplified loop emission
+      lines.push(`; for loop`);
+      for (const s of stmt.body || []) {
+        emitXCore1000Stmt(s, lines, ptrRegs, params);
+      }
+      break;
+    }
+    case 'SharedVarDecl':
+      // __shared__ declarations \u2192 BSM allocation (metadata only)
+      break;
+    case 'SyncThreads':
+      lines.push('\tarrive bsmcnt(0)');
+      lines.push('\tbarrier');
+      lines.push('\tarrive bsmcnt(0)');
+      break;
+  }
+}
+
+/** Emit xcore1000 assembly for an expression (result in r_result) */
+function emitXCore1000Expr(expr: any, lines: string[], ptrRegs: string[], params: any[]): void {
+  if (!expr) return;
+
+  switch (expr.kind) {
+    case 'IntLiteral':
+      lines.push(`\tmov_b32 r_result, ${expr.value}`);
+      break;
+    case 'BuiltinVar':
+      if (expr.var === 'threadIdx') {
+        lines.push('\tand_b32 r_result, 0x3ff, r0');
+      } else if (expr.var === 'blockIdx') {
+        lines.push('\tldu_b32 r_result, s0, 0x10');
+      } else if (expr.var === 'blockDim') {
+        lines.push('\tldu_b32 r_result, s0, 0x4');
+      }
+      break;
+    case 'BinaryOp':
+      emitXCore1000Expr(expr.lhs, lines, ptrRegs, params);
+      lines.push('\tmov_b32 r_lhs, r_result');
+      emitXCore1000Expr(expr.rhs, lines, ptrRegs, params);
+      switch (expr.op) {
+        case '+': lines.push('\tadd_u32 r_result, r_lhs, r_result'); break;
+        case '-': lines.push('\tsub_u32 r_result, r_lhs, r_result'); break;
+        case '*': lines.push('\tmul_u32 r_result, r_lhs, r_result'); break;
+        case '/': lines.push('\tcvt_u32tof32 r_f1, r_lhs'); break; // simplified
+        case '<': lines.push('\tcmp_lt_i32 s_cmp, r_lhs, r_result'); break;
+        case '>': lines.push('\tcmp_gt_i32 s_cmp, r_lhs, r_result'); break;
+      }
+      break;
+    case 'ArrayIndex': {
+      const ptrIdx = params.findIndex(p => p.name === expr.array);
+      if (ptrIdx >= 0 && ptrIdx < ptrRegs.length) {
+        emitXCore1000Expr(expr.index, lines, ptrRegs, params);
+        lines.push(`\tmad_i32 r_addr, r_result, 4, ${ptrRegs[ptrIdx]}`);
+        lines.push(`\tldg_b32 r_result, r_addr, 0x0`);
+        lines.push('\tarrive gvmcnt(0)');
+      }
+      break;
+    }
+  }
+}
+
+/** Analyze xcore1000 assembly for performance metrics */
+function analyzeXCore1000Assembly(lines: string[]): AnalysisResult {
+  let computeCount = 0, memoryCount = 0, branchCount = 0, barrierCount = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith(';') || trimmed.startsWith('.')) continue;
+
+    const mnemonic = trimmed.split(/\s+/)[0];
+    if (['add_u32', 'sub_u32', 'mul_u32', 'mad_i32', 'add_f32', 'sub_f32',
+         'mul_f32', 'fma_f32', 'fmac_f32', 'rcp_f32', 'min_f32', 'max_f32',
+         'div_scale_f32', 'div_fmas_f32', 'div_fixup_f32'].includes(mnemonic)) {
+      computeCount++;
+    } else if (['ldg_b32', 'stg_b32', 'stg_b64', 'stg_b128',
+                'lds_b32', 'sts_b32', 'ldu_b32', 'ldu_b64', 'ldu_b128'].includes(mnemonic)) {
+      memoryCount++;
+    } else if (['bra', 'bra_smsks', 'bra_smskz', 'bra_xmskz'].includes(mnemonic)) {
+      branchCount++;
+    } else if (mnemonic === 'barrier') {
+      barrierCount++;
+    }
+  }
+
+  const totalInstructions = computeCount + memoryCount + branchCount + barrierCount;
+
+  return {
+    divergence: [],
+    coalescing: [],
+    metrics: {
+      totalInstructions,
+      registersUsed: 0,
+      sharedMemoryBytes: 0,
+      branchInstructions: branchCount,
+      memoryInstructions: memoryCount,
+      computeInstructions: computeCount,
+      barrierCount,
+      estimatedCycles: totalInstructions * 2,
+      computeToMemoryRatio: memoryCount > 0 ? Math.round((computeCount / memoryCount) * 100) / 100 : 0,
+      optimizationSummary: `xcore1000: ${totalInstructions} instructions emitted`,
+    },
+  };
 }

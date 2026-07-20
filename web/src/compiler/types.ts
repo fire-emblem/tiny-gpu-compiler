@@ -1,10 +1,21 @@
-/** Represents a single 16-bit instruction */
+/** Represents a single 16-bit instruction (tiny-gpu) */
 export interface Instruction {
   addr: number;
   hex: string;
   asm: string;
   bits: string;
 }
+
+/** Represents a single 32-bit xcore1000 instruction */
+export interface XCore1000Instruction {
+  addr: number;
+  mnemonic: string;
+  operands: string;
+  asm: string;
+}
+
+/** Target architecture */
+export type TargetArch = 'tinygpu' | 'xcore1000';
 
 /** A single compilation stage showing IR at that point */
 export interface CompilationStage {
@@ -58,6 +69,14 @@ export interface CompilationTrace {
     instructions: Instruction[];
   };
   analysis?: AnalysisResult;
+  target?: TargetArch;
+}
+
+/** xcore1000 compilation trace (JSON format from tgc --target xcore1000 --emit trace) */
+export interface XCore1000CompilationTrace {
+  target: 'xcore1000';
+  source: string;
+  assembly: string;
 }
 
 /** Opcode definitions matching tiny-gpu's decoder.sv */
@@ -95,6 +114,123 @@ export const OPCODE_NAMES: Record<number, string> = {
   [Opcode.RET]: 'RET',
 };
 
+/** xcore1000 instruction categories */
+export enum XCore1000InstCategory {
+  INTEGER_ARITH = 'integer_arith',
+  BITWISE = 'bitwise',
+  FLOAT_ARITH = 'float_arith',
+  CONVERSION = 'conversion',
+  COMPARISON = 'comparison',
+  SELECT = 'select',
+  MEMORY_GLOBAL = 'memory_global',
+  MEMORY_SHARED = 'memory_shared',
+  ATOMIC = 'atomic',
+  BARRIER = 'barrier',
+  CONTROL_FLOW = 'control_flow',
+  WARP = 'warp',
+  SPECIAL = 'special',
+}
+
+/** xcore1000 instruction mnemonic → category mapping */
+export const XCORE1000_MNEMONIC_CATEGORIES: Record<string, XCore1000InstCategory> = {
+  // Integer arithmetic
+  add_u32: XCore1000InstCategory.INTEGER_ARITH,
+  sub_u32: XCore1000InstCategory.INTEGER_ARITH,
+  mul_u32: XCore1000InstCategory.INTEGER_ARITH,
+  mul_hi_u32: XCore1000InstCategory.INTEGER_ARITH,
+  mad_i32: XCore1000InstCategory.INTEGER_ARITH,
+  smul_i32: XCore1000InstCategory.INTEGER_ARITH,
+  sadd_co_i32: XCore1000InstCategory.INTEGER_ARITH,
+  ssub_co_i32: XCore1000InstCategory.INTEGER_ARITH,
+  // Bitwise
+  and_b32: XCore1000InstCategory.BITWISE,
+  sand_b32: XCore1000InstCategory.BITWISE,
+  sor_b32: XCore1000InstCategory.BITWISE,
+  xor_b32: XCore1000InstCategory.BITWISE,
+  sxor_b32: XCore1000InstCategory.BITWISE,
+  shl_b32: XCore1000InstCategory.BITWISE,
+  sshr_b32: XCore1000InstCategory.BITWISE,
+  sashr_i32: XCore1000InstCategory.BITWISE,
+  sclz_b32: XCore1000InstCategory.BITWISE,
+  sbcs_b32: XCore1000InstCategory.BITWISE,
+  perm_b32: XCore1000InstCategory.BITWISE,
+  // Float arithmetic
+  add_f32: XCore1000InstCategory.FLOAT_ARITH,
+  sub_f32: XCore1000InstCategory.FLOAT_ARITH,
+  mul_f32: XCore1000InstCategory.FLOAT_ARITH,
+  fma_f32: XCore1000InstCategory.FLOAT_ARITH,
+  fmac_f32: XCore1000InstCategory.FLOAT_ARITH,
+  rcp_f32: XCore1000InstCategory.FLOAT_ARITH,
+  rcpi_f32: XCore1000InstCategory.FLOAT_ARITH,
+  min_f32: XCore1000InstCategory.FLOAT_ARITH,
+  max_f32: XCore1000InstCategory.FLOAT_ARITH,
+  div_scale_f32: XCore1000InstCategory.FLOAT_ARITH,
+  div_fmas_f32: XCore1000InstCategory.FLOAT_ARITH,
+  div_fixup_f32: XCore1000InstCategory.FLOAT_ARITH,
+  // Double arithmetic
+  add_f64: XCore1000InstCategory.FLOAT_ARITH,
+  mul_f64: XCore1000InstCategory.FLOAT_ARITH,
+  fma_f64: XCore1000InstCategory.FLOAT_ARITH,
+  fmac_f64: XCore1000InstCategory.FLOAT_ARITH,
+  div_scale_f64: XCore1000InstCategory.FLOAT_ARITH,
+  div_fmas_f64: XCore1000InstCategory.FLOAT_ARITH,
+  div_fixup_f64: XCore1000InstCategory.FLOAT_ARITH,
+  // Conversion
+  cvt_i32tof32: XCore1000InstCategory.CONVERSION,
+  cvt_f32toi32: XCore1000InstCategory.CONVERSION,
+  cvt_u32tof32: XCore1000InstCategory.CONVERSION,
+  cvt_f32tou32: XCore1000InstCategory.CONVERSION,
+  cvt_f32tof64: XCore1000InstCategory.CONVERSION,
+  cvt_f64tof32: XCore1000InstCategory.CONVERSION,
+  // Comparison
+  cmp_lt_i32: XCore1000InstCategory.COMPARISON,
+  cmp_gt_i32: XCore1000InstCategory.COMPARISON,
+  cmp_ge_u32: XCore1000InstCategory.COMPARISON,
+  cmp_eq_u32: XCore1000InstCategory.COMPARISON,
+  cmp_lg_u32: XCore1000InstCategory.COMPARISON,
+  cmp_eq_u64: XCore1000InstCategory.COMPARISON,
+  scmp_lt_i32: XCore1000InstCategory.COMPARISON,
+  scmp_eq_u64: XCore1000InstCategory.COMPARISON,
+  scmp_ne_u64: XCore1000InstCategory.COMPARISON,
+  // Select
+  csel_b32: XCore1000InstCategory.SELECT,
+  // Global memory
+  ldg_b32: XCore1000InstCategory.MEMORY_GLOBAL,
+  stg_b32: XCore1000InstCategory.MEMORY_GLOBAL,
+  stg_b64: XCore1000InstCategory.MEMORY_GLOBAL,
+  stg_b96: XCore1000InstCategory.MEMORY_GLOBAL,
+  stg_b128: XCore1000InstCategory.MEMORY_GLOBAL,
+  // Shared memory
+  lds_b32: XCore1000InstCategory.MEMORY_SHARED,
+  sts_b32: XCore1000InstCategory.MEMORY_SHARED,
+  // Kernarg loads
+  ldu_b32: XCore1000InstCategory.MEMORY_GLOBAL,
+  ldu_b64: XCore1000InstCategory.MEMORY_GLOBAL,
+  ldu_b128: XCore1000InstCategory.MEMORY_GLOBAL,
+  ldu_b256: XCore1000InstCategory.MEMORY_GLOBAL,
+  // Atomic
+  atom_global_add_i32: XCore1000InstCategory.ATOMIC,
+  // Barrier
+  barrier: XCore1000InstCategory.BARRIER,
+  arrive: XCore1000InstCategory.BARRIER,
+  // Control flow
+  bra: XCore1000InstCategory.CONTROL_FLOW,
+  bra_smsks: XCore1000InstCategory.CONTROL_FLOW,
+  bra_smskz: XCore1000InstCategory.CONTROL_FLOW,
+  bra_xmskz: XCore1000InstCategory.CONTROL_FLOW,
+  // Warp
+  mbcnt_lo_b32: XCore1000InstCategory.WARP,
+  mbcnt_hi_b32: XCore1000InstCategory.WARP,
+  sm_bperm_b32: XCore1000InstCategory.WARP,
+  and_xmsk: XCore1000InstCategory.WARP,
+  // Special
+  mov_b32: XCore1000InstCategory.SPECIAL,
+  smov_b32: XCore1000InstCategory.SPECIAL,
+  snop: XCore1000InstCategory.SPECIAL,
+  endk: XCore1000InstCategory.SPECIAL,
+  trap: XCore1000InstCategory.SPECIAL,
+};
+
 /** Pipeline stages for each core's state machine */
 export enum PipelineStage {
   FETCH   = 'FETCH',
@@ -107,7 +243,7 @@ export enum PipelineStage {
   DONE    = 'DONE',
 }
 
-/** Per-thread execution state */
+/** Per-thread execution state (tiny-gpu) */
 export interface ThreadState {
   threadId: number;
   blockId: number;
@@ -120,12 +256,37 @@ export interface ThreadState {
   divergent?: boolean;       // true if this thread diverged from majority
 }
 
+/** Per-thread execution state (xcore1000) */
+export interface XCore1000ThreadState {
+  threadId: number;
+  blockId: number;
+  pc: number;
+  vgprs: number[];           // Vector GPRs (r0-r31), 32-bit each
+  sgprs: number[];           // Scalar GPRs (s0-s31), 32-bit each (shared within warp)
+  execMask: bigint;          // 64-bit execution mask
+  cmpFlag: boolean;          // Scalar comparison flag
+  done: boolean;
+  currentInstruction: string;
+  divergent?: boolean;
+}
+
 /** Full GPU simulation state at one cycle */
 export interface SimulationState {
   cycle: number;
   threads: ThreadState[];
   memory: number[];          // 256-byte data memory
   sharedMemory: number[];    // 64-byte shared memory per block
+  currentBlock: number;
+  totalBlocks: number;
+}
+
+/** Full GPU simulation state for xcore1000 */
+export interface XCore1000SimulationState {
+  cycle: number;
+  warpSize: number;          // 64 threads per warp
+  warps: XCore1000ThreadState[][];
+  globalMemory: Float32Array;
+  sharedMemory: Float32Array; // BSM per block
   currentBlock: number;
   totalBlocks: number;
 }

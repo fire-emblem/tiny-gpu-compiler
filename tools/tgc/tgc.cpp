@@ -28,6 +28,15 @@ static cl::opt<tgc::OutputFormat> emitFormat(
                    "JSON trace for web visualizer")),
     cl::init(tgc::OutputFormat::Assembly));
 
+static cl::opt<tgc::Target> targetArch(
+    "target", cl::desc("Target architecture"),
+    cl::values(
+        clEnumValN(tgc::Target::TinyGPU, "tinygpu",
+                   "tiny-gpu 16-bit ISA (default)"),
+        clEnumValN(tgc::Target::XCore1000, "xcore1000",
+                   "MetaX xcore1000 32-bit ISA")),
+    cl::init(tgc::Target::TinyGPU));
+
 int main(int argc, char **argv) {
   InitLLVM y(argc, argv);
   cl::ParseCommandLineOptions(argc, argv,
@@ -55,6 +64,7 @@ int main(int argc, char **argv) {
   // Compile
   tgc::CompilerOptions opts;
   opts.format = emitFormat;
+  opts.target = targetArch;
   tgc::compile(source, opts, output->os());
 
   output->keep();

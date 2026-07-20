@@ -6,7 +6,7 @@ import { GPUSimulator } from './components/GPUSimulator';
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { compileTGC } from './compiler/TGCCompiler';
 import { EXAMPLES } from './examples';
-import { CompilationTrace, SimulationState } from './compiler/types';
+import { CompilationTrace, SimulationState, TargetArch } from './compiler/types';
 
 type RightPanel = 'simulator' | 'analysis';
 
@@ -16,16 +16,23 @@ export default function App() {
   const [trace, setTrace] = useState<CompilationTrace>(EXAMPLES[0].trace);
   const [highlightAddr, setHighlightAddr] = useState<number | undefined>(undefined);
   const [rightPanel, setRightPanel] = useState<RightPanel>('simulator');
+  const [target, setTarget] = useState<TargetArch>('tinygpu');
   const compileTimeout = useRef<number | null>(null);
 
   const handleSourceChange = useCallback((newSource: string) => {
     setSource(newSource);
     if (compileTimeout.current) clearTimeout(compileTimeout.current);
     compileTimeout.current = window.setTimeout(() => {
-      const result = compileTGC(newSource);
+      const result = compileTGC(newSource, target);
       setTrace(result);
     }, 300);
-  }, []);
+  }, [target]);
+
+  const handleTargetChange = useCallback((newTarget: TargetArch) => {
+    setTarget(newTarget);
+    const result = compileTGC(source, newTarget);
+    setTrace(result);
+  }, [source]);
 
   const handleExampleChange = useCallback((index: number) => {
     setSelectedExample(index);
@@ -75,6 +82,25 @@ export default function App() {
         </span>
 
         <div style={{ flex: 1 }} />
+
+        {/* Target selector */}
+        <select
+          value={target}
+          onChange={(e) => handleTargetChange(e.target.value as TargetArch)}
+          style={{
+            padding: '4px 8px',
+            fontSize: '12px',
+            background: target === 'xcore1000' ? '#1a2e1a' : '#1a1a2e',
+            color: target === 'xcore1000' ? '#4ec9b0' : '#e0e0e0',
+            border: `1px solid ${target === 'xcore1000' ? '#4ec9b0' : '#333'}`,
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: target === 'xcore1000' ? 700 : 400,
+          }}
+        >
+          <option value="tinygpu">tiny-gpu (16-bit)</option>
+          <option value="xcore1000">xcore1000 (32-bit)</option>
+        </select>
 
         {/* Example selector */}
         <select

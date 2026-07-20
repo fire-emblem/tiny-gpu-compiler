@@ -1,8 +1,11 @@
 #include "tiny-gpu-compiler/Pipeline/Pipeline.h"
 #include "tiny-gpu-compiler/CodeGen/RegisterAllocator.h"
 #include "tiny-gpu-compiler/CodeGen/TinyGPUEmitter.h"
+#include "tiny-gpu-compiler/CodeGen/XCore1000Emitter.h"
 #include "tiny-gpu-compiler/Dialect/TinyGPU/TinyGPUDialect.h"
 #include "tiny-gpu-compiler/Dialect/TinyGPU/TinyGPUOps.h"
+#include "tiny-gpu-compiler/Dialect/XCore1000/XCore1000Dialect.h"
+#include "tiny-gpu-compiler/Dialect/XCore1000/XCore1000Ops.h"
 #include "tiny-gpu-compiler/Frontend/Lexer.h"
 #include "tiny-gpu-compiler/Frontend/MLIRGen.h"
 #include "tiny-gpu-compiler/Frontend/Parser.h"
@@ -12,8 +15,6 @@
 #include "mlir/IR/Verifier.h"
 
 using namespace mlir;
-
-namespace tgc {
 
 /// Capture the current module IR as a string.
 static std::string captureIR(ModuleOp module) {
@@ -84,13 +85,13 @@ static void analyzeInstructions(CompilationTrace &trace) {
   }
 }
 
-CompilationTrace compile(const std::string &source,
-                         const CompilerOptions &opts,
-                         llvm::raw_ostream &os) {
+/// Run the TinyGPU backend pipeline (existing 16-bit ISA)
+static CompilationTrace compileTinyGPU(const std::string &source,
+                                       const CompilerOptions &opts,
+                                       llvm::raw_ostream &os) {
   CompilationTrace trace;
   trace.sourceCode = source;
 
-  // Set up MLIR context with our dialect
   MLIRContext context;
   context.getOrLoadDialect<tinygpu::TinyGPUDialect>();
 
@@ -186,6 +187,115 @@ CompilationTrace compile(const std::string &source,
   }
 
   return trace;
+}
+
+/// Run the xcore1000 backend pipeline (MetaX 32-bit ISA)
+static CompilationTrace compileXCore1000(const std::string &source,
+                                         const CompilerOptions &opts,
+                                         llvm::raw_ostream &os) {
+  CompilationTrace trace;
+  trace.sourceCode = source;
+
+  // For xcore1000, we use the TinyGPU frontend but emit xcore1000 assembly.
+  // The MLIRGen produces TinyGPU dialect ops, which we then interpret as
+  // xcore1000 operations during emission. A full implementation would lower
+  // TinyGPU → XCore1000 dialect first, but for now we emit directly.
+
+  MLIRContext context;
+  context.getOrLoadDialect<tinygpu::TinyGPUDialect>();
+
+  // Stage 1: Frontend — Parse .tgc source to AST
+  Lexer lexer(source);
+  Parser parser(lexer);
+  auto program = parser.parseProgram();
+
+  // Stage 2: MLIRGen — AST to MLIR (TinyGPU dialect)
+  auto module = mlirGen(context, *program);
+  if (!module) {
+    llvm::errs() << "MLIRGen failed\n";
+    return trace;
+  }
+
+  trace.irStages.push_back(
+      {"Frontend \xe2\x86\x92 TinyGPU Dialect", captureIR(*module)});
+
+  if (opts.format == OutputFormat::MLIR) {
+    module->print(os);
+    return trace;
+  }
+
+  // Stage 2.5: Optimization Passes
+  OptimizationStats optStats;
+  for (auto &op : module->getBody()->getOperations()) {
+    if (isa<tinygpu::FuncOp>(&op)) {
+      optStats = runAllOptimizations(&op);
+    }
+  }
+
+  trace.irStages.push_back(
+      {"Optimization Passes", captureIR(*module)});
+  trace.analysis.optimizationSummary = optStats.summary();
+
+  // Stage 3: Register Allocation (TinyGPU register model)
+  for (auto &op : module->getBody()->getOperations()) {
+    if (isa<tinygpu::FuncOp>(&op)) {
+      if (failed(allocateRegisters(&op))) {
+        llvm::errs() << "Register allocation failed\n";
+        return trace;
+      }
+    }
+  }
+
+  trace.irStages.push_back({"Register Allocation", captureIR(*module)});
+
+  // Stage 4: xcore1000 Assembly Emission
+  // We walk the TinyGPU ops and emit xcore1000 assembly directly.
+  // This is a transpilation layer: TinyGPU semantics → xcore1000 instructions.
+  if (opts.format == OutputFormat::Assembly ||
+      opts.format == OutputFormat::Hex) {
+    emitXCore1000FullAssembly(*module, os);
+  } else if (opts.format == OutputFormat::JsonTrace) {
+    // For JSON trace, emit xcore1000 assembly as the "binary" output
+    std::string asmStr;
+    llvm::raw_string_ostream asmOs(asmStr);
+    emitXCore1000FullAssembly(*module, asmOs);
+    // Wrap in a minimal JSON trace
+    os << "{\n";
+    os << "  \"target\": \"xcore1000\",\n";
+    os << "  \"source\": \"";
+    for (char c : source) {
+      if (c == '"') os << "\\\"";
+      else if (c == '\\') os << "\\\\";
+      else if (c == '\n') os << "\\n";
+      else if (c == '\t') os << "\\t";
+      else os << c;
+    }
+    os << "\",\n";
+    os << "  \"assembly\": \"";
+    for (char c : asmStr) {
+      if (c == '"') os << "\\\"";
+      else if (c == '\\') os << "\\\\";
+      else if (c == '\n') os << "\\n";
+      else if (c == '\t') os << "\\t";
+      else os << c;
+    }
+    os << "\"\n";
+    os << "}\n";
+  }
+
+  return trace;
+}
+
+CompilationTrace compile(const std::string &source,
+                         const CompilerOptions &opts,
+                         llvm::raw_ostream &os) {
+  switch (opts.target) {
+  case Target::XCore1000:
+    return compileXCore1000(source, opts, os);
+  case Target::TinyGPU:
+  default:
+    return compileTinyGPU(source, opts, os);
+  }
 }
 
 } // namespace tgc
