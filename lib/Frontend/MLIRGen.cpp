@@ -362,6 +362,8 @@ private:
     switch (expr.kind) {
     case ExprKind::IntLiteral:
       return genIntLiteral(static_cast<const IntLiteralExpr &>(expr));
+    case ExprKind::FloatLiteral:
+      return genFloatLiteral(static_cast<const FloatLiteralExpr &>(expr));
     case ExprKind::Identifier:
       return genIdentifier(static_cast<const IdentifierExpr &>(expr));
     case ExprKind::BuiltinVar:
@@ -385,6 +387,15 @@ private:
     }
     return builder.create<tinygpu::ConstOp>(loc(expr.loc),
                                             (uint8_t)expr.value);
+  }
+
+  Value genFloatLiteral(const FloatLiteralExpr &expr) {
+    // Encode float as its low 8 bits (truncated) for the i8 tinygpu dialect.
+    // The xcore1000 emitter will handle proper float encoding.
+    uint32_t bits;
+    memcpy(&bits, &expr.value, 4);
+    uint8_t truncated = (uint8_t)(bits & 0xFF);
+    return builder.create<tinygpu::ConstOp>(loc(expr.loc), truncated);
   }
 
   Value genIdentifier(const IdentifierExpr &expr) {

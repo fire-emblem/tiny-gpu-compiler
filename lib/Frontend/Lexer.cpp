@@ -78,6 +78,8 @@ Token Lexer::lexIdentifierOrKeyword() {
     kind = TokenKind::Global;
   else if (text == "int")
     kind = TokenKind::Int;
+  else if (text == "float")
+    kind = TokenKind::Float;
   else if (text == "for")
     kind = TokenKind::For;
   else if (text == "if")
@@ -109,6 +111,27 @@ Token Lexer::lexNumber() {
   while (pos < (int)source.size() && std::isdigit(source[pos])) {
     pos++;
     col++;
+  }
+
+  // Check for float literal: digits followed by '.' and more digits
+  if (pos < (int)source.size() && source[pos] == '.' &&
+      pos + 1 < (int)source.size() && std::isdigit(source[pos + 1])) {
+    pos++; col++; // skip '.'
+    while (pos < (int)source.size() && std::isdigit(source[pos])) {
+      pos++;
+      col++;
+    }
+    // Optional 'f' suffix
+    if (pos < (int)source.size() && source[pos] == 'f') {
+      pos++;
+      col++;
+    }
+    Token tok;
+    tok.kind = TokenKind::FloatLiteral;
+    tok.text = source.substr(start, pos - start);
+    tok.line = line;
+    tok.col = startCol;
+    return tok;
   }
 
   Token tok;

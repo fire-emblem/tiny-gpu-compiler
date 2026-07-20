@@ -18,6 +18,7 @@ struct Location {
 
 enum class ExprKind {
   IntLiteral,
+  FloatLiteral,
   Identifier,
   BuiltinVar,
   BinaryOp,
@@ -35,6 +36,14 @@ struct IntLiteralExpr : Expr {
   int value;
   IntLiteralExpr(int val, Location loc) : value(val) {
     kind = ExprKind::IntLiteral;
+    this->loc = loc;
+  }
+};
+
+struct FloatLiteralExpr : Expr {
+  float value;
+  FloatLiteralExpr(float val, Location loc) : value(val) {
+    kind = ExprKind::FloatLiteral;
     this->loc = loc;
   }
 };
@@ -202,9 +211,12 @@ struct IfStmt : Stmt {
 // Kernel parameters and top-level
 //===----------------------------------------------------------------------===//
 
+enum class VarType { Int, Float };
+
 struct KernelParam {
   std::string name;
-  bool isGlobalPtr; // true = "global int*", false = "int"
+  bool isGlobalPtr; // true = "global int*/float*", false = "int/float"
+  VarType type = VarType::Int;
   Location loc;
 };
 

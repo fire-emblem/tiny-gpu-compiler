@@ -88,16 +88,30 @@ KernelParam Parser::parseParam() {
 
   if (check(TokenKind::Global)) {
     advance(); // consume 'global'
-    consume(TokenKind::Int, "expected 'int' after 'global'");
-    consume(TokenKind::Star, "expected '*' after 'int'");
+    // Accept either 'int' or 'float' after 'global'
+    if (check(TokenKind::Float)) {
+      advance();
+      param.type = VarType::Float;
+    } else {
+      consume(TokenKind::Int, "expected 'int' or 'float' after 'global'");
+      param.type = VarType::Int;
+    }
+    consume(TokenKind::Star, "expected '*' after type");
     Token name = consume(TokenKind::Identifier, "expected parameter name");
     param.name = name.text;
     param.isGlobalPtr = true;
-  } else {
-    consume(TokenKind::Int, "expected 'int' or 'global'");
+  } else if (check(TokenKind::Float)) {
+    advance(); // consume 'float'
     Token name = consume(TokenKind::Identifier, "expected parameter name");
     param.name = name.text;
     param.isGlobalPtr = false;
+    param.type = VarType::Float;
+  } else {
+    consume(TokenKind::Int, "expected 'int', 'float', or 'global'");
+    Token name = consume(TokenKind::Identifier, "expected parameter name");
+    param.name = name.text;
+    param.isGlobalPtr = false;
+    param.type = VarType::Int;
   }
 
   return param;
@@ -118,7 +132,7 @@ std::vector<std::unique_ptr<Stmt>> Parser::parseBlock() {
 }
 
 std::unique_ptr<Stmt> Parser::parseStatement() {
-  if (check(TokenKind::Int))
+  if (check(TokenKind::Int) || check(TokenKind::Float))
     return parseVarDecl();
   if (check(TokenKind::Shared))
     return parseSharedVarDecl();
@@ -133,7 +147,11 @@ std::unique_ptr<Stmt> Parser::parseStatement() {
 
 std::unique_ptr<VarDeclStmt> Parser::parseVarDecl() {
   Location loc = currentLoc();
-  consume(TokenKind::Int, "expected 'int'");
+  // Consume type keyword (int or float)
+  if (check(TokenKind::Float))
+    advance();
+  else
+    consume(TokenKind::Int, "expected 'int' or 'float'");
   Token name = consume(TokenKind::Identifier, "expected variable name");
   consume(TokenKind::Equal, "expected '='");
   auto init = parseExpr();
@@ -324,6 +342,13 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
   if (check(TokenKind::BlockDim)) {
     advance();
     return std::make_unique<BuiltinVarExpr>(BuiltinVar::BlockDim, loc);
+  }
+
+  // Float literal
+  if (check(TokenKind::FloatLiteral)) {
+    Token tok = advance();
+    float val = std::stof(tok.text);
+    return std::make_unique<FloatLiteralExpr>(val, loc);
   }
 
   // Integer literal

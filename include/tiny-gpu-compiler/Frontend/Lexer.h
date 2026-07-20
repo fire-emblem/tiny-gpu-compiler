@@ -13,6 +13,7 @@ enum class TokenKind {
   Kernel,
   Global,
   Int,
+  Float,
   For,
   If,
   Else,
@@ -29,6 +30,7 @@ enum class TokenKind {
   // Literals & identifiers
   Identifier,
   IntLiteral,
+  FloatLiteral,
 
   // Operators
   Plus,
