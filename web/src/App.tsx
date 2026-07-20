@@ -242,6 +242,8 @@ export default function App() {
               <BinaryView
                 instructions={trace.binary.instructions}
                 highlightAddr={highlightAddr}
+                target={target}
+                assembly={target === 'xcore1000' ? (trace as any).assembly : undefined}
               />
             </div>
           </div>
