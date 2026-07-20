@@ -109,7 +109,7 @@ static void emitOp(Operation *op, std::vector<XCore1000Instruction> &insts,
   // --- Constants ---
   if (auto constOp = dyn_cast<xcore::ConstIOp>(op)) {
     int sd = allocSgpr(constOp.getResult());
-    int val = constOp.getValue().getZExtValue();
+    int val = constOp.getValue();
     addInst("mov_b32 " + sgprName(sd) + ", " + std::to_string(val));
     return;
   }
@@ -120,8 +120,10 @@ static void emitOp(Operation *op, std::vector<XCore1000Instruction> &insts,
     // Emit as hex for IEEE754 encoding
     uint32_t bits;
     memcpy(&bits, &val, 4);
-    addInst("mov_b32 " + sgprName(sd) + ", 0x" +
-            llvm::format_hex_no_prefix(bits, 8));
+    std::string hexStr;
+    llvm::raw_string_ostream hexOs(hexStr);
+    hexOs << llvm::format_hex_no_prefix(bits, 8);
+    addInst("mov_b32 " + sgprName(sd) + ", 0x" + hexOs.str());
     return;
   }
 
@@ -576,17 +578,21 @@ void emitXCore1000FullAssembly(mlir::ModuleOp module, llvm::raw_ostream &os) {
         "xcore1000\n";
   os << "\t.text\n";
 
-  for (auto &op : module->getBody()->getOperations()) {
+  for (auto &op : module.getBody()->getOperations()) {
     if (isa<xcore::FuncOp>(&op)) {
       emitXCore1000Assembly(&op, os);
 
       // Count VGPRs and SGPRs used
       int maxVgpr = 0, maxSgpr = 0;
       op.walk([&](Operation *child) {
-        if (auto rd = child->getAttrOfType<IntegerAttr>("vgpr_rd"))
-          maxVgpr = std::max(maxVgpr, rd.getInt());
-        if (auto sd = child->getAttrOfType<IntegerAttr>("sgpr_sd"))
-          maxSgpr = std::max(maxSgpr, sd.getInt());
+        if (auto rd = child->getAttrOfType<IntegerAttr>("vgpr_rd")) {
+          int rdInt = static_cast<int>(rd.getInt());
+          if (rdInt > maxVgpr) maxVgpr = rdInt;
+        }
+        if (auto sd = child->getAttrOfType<IntegerAttr>("sgpr_sd")) {
+          int sdInt = static_cast<int>(sd.getInt());
+          if (sdInt > maxSgpr) maxSgpr = sdInt;
+        }
       });
 
       XCore1000KernelMeta meta;

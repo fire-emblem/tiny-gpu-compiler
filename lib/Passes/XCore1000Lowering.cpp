@@ -24,7 +24,7 @@ static xcore::FuncOp lowerFuncOp(tinygpu::FuncOp oldFunc, OpBuilder &builder) {
       loc, oldFunc.getName(), newFuncType);
 
   // Create entry block
-  Block *entryBlock = newFunc.addEntryBlock();
+  Block *entryBlock = &newFunc.getBody().front();
   builder.setInsertionPointToStart(entryBlock);
 
   // Walk old function and convert ops
@@ -72,7 +72,7 @@ static xcore::FuncOp lowerFuncOp(tinygpu::FuncOp oldFunc, OpBuilder &builder) {
 
       // --- Constants ---
       if (auto constOp = dyn_cast<tinygpu::ConstOp>(&op)) {
-        uint8_t val = constOp.getValue().getZExtValue();
+        uint8_t val = constOp.getValue();
         auto newOp = builder.create<xcore::ConstIOp>(op.getLoc(),
             builder.getI32IntegerAttr(val));
         mapValue(constOp.getResult(), newOp.getResult());
@@ -127,12 +127,8 @@ static xcore::FuncOp lowerFuncOp(tinygpu::FuncOp oldFunc, OpBuilder &builder) {
       if (auto loadOp = dyn_cast<tinygpu::LoadOp>(&op)) {
         auto addr = getI32(loadOp.getAddr());
         if (!addr) continue;
-        // Zero-extend i32 address to i64 for global memory
-        auto addr64 = builder.create<xcore::ConstIOp>(op.getLoc(),
-            builder.getI32IntegerAttr(0));
-        // Use addr_calc to form a 64-bit address (simplified)
         auto newOp = builder.create<xcore::LoadGlobalOp>(op.getLoc(),
-            builder.getI64Type(), addr64.getResult());
+            builder.getI32Type(), addr);
         mapValue(loadOp.getResult(), newOp.getResult());
         continue;
       }
@@ -140,10 +136,7 @@ static xcore::FuncOp lowerFuncOp(tinygpu::FuncOp oldFunc, OpBuilder &builder) {
         auto addr = getI32(storeOp.getAddr());
         auto val = getI32(storeOp.getValue());
         if (!addr || !val) continue;
-        auto addr64 = builder.create<xcore::ConstIOp>(op.getLoc(),
-            builder.getI32IntegerAttr(0));
-        builder.create<xcore::StoreGlobalOp>(op.getLoc(),
-            addr64.getResult(), val);
+        builder.create<xcore::StoreGlobalOp>(op.getLoc(), addr, val);
         continue;
       }
 
@@ -208,7 +201,7 @@ bool lowerTinyGPUToXCore1000(ModuleOp module) {
 
   // Collect all TinyGPU FuncOps
   std::vector<tinygpu::FuncOp> oldFuncs;
-  for (auto &op : module->getBody()->getOperations()) {
+  for (auto &op : *module.getBody()) {
     if (auto funcOp = dyn_cast<tinygpu::FuncOp>(&op))
       oldFuncs.push_back(funcOp);
   }

@@ -4,6 +4,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <cstdlib>
@@ -13,9 +14,23 @@ using namespace mlir;
 
 namespace tgc {
 
+/// Helper: find or create an LLVM function declaration in the module.
+static LLVM::LLVMFuncOp getOrCreateLLVMFn(ModuleOp module, StringRef name,
+                                           LLVM::LLVMFunctionType fnType) {
+  for (auto &op : *module.getBody()) {
+    if (auto fn = dyn_cast<LLVM::LLVMFuncOp>(&op))
+      if (fn.getName() == name)
+        return fn;
+  }
+  OpBuilder builder(module.getContext());
+  builder.setInsertionPointToStart(module.getBody());
+  auto fn = builder.create<LLVM::LLVMFuncOp>(
+      module.getLoc(), name, fnType);
+  fn.setPrivate();
+  return fn;
+}
+
 /// Convert an XCore1000 module to LLVM dialect.
-/// This generates LLVM dialect MLIR that can be translated to LLVM IR bitcode
-/// and compiled by mxcc to run on the MetaX xcore1000 GPU.
 bool lowerXCore1000ToLLVM(ModuleOp module) {
   MLIRContext *ctx = module.getContext();
   OpBuilder builder(ctx);
@@ -32,7 +47,7 @@ bool lowerXCore1000ToLLVM(ModuleOp module) {
 
   // Collect XCore1000 FuncOps
   std::vector<xcore::FuncOp> oldFuncs;
-  for (auto &op : module->getBody()->getOperations()) {
+  for (auto &op : *module.getBody()) {
     if (auto funcOp = dyn_cast<xcore::FuncOp>(&op))
       oldFuncs.push_back(funcOp);
   }
@@ -41,13 +56,10 @@ bool lowerXCore1000ToLLVM(ModuleOp module) {
   llvm::DenseMap<Value, Value> vmap;
 
   for (auto oldFunc : oldFuncs) {
-    // Create LLVM function with kernel attributes
     builder.setInsertionPoint(oldFunc);
 
     auto i32Ty = builder.getI32Type();
-    auto i64Ty = builder.getI64Type();
-    auto floatTy = builder.getF32Type();
-    auto voidTy = builder.getNoneType();
+    auto voidTy = LLVM::LLVMVoidType::get(ctx);
 
     // Kernel function: void @name()
     auto funcType = LLVM::LLVMFunctionType::get(voidTy, {}, false);
@@ -62,40 +74,40 @@ bool lowerXCore1000ToLLVM(ModuleOp module) {
     }));
 
     // Create entry block
-    Block *entryBlock = llvmFunc.addEntryBlock();
+    Block *entryBlock = &llvmFunc.getBody().front();
     builder.setInsertionPointToStart(entryBlock);
+
+    // Pre-declare intrinsics
+    auto intrinsicTy = LLVM::LLVMFunctionType::get(i32Ty, {});
+    auto tidFn = getOrCreateLLVMFn(module, "llvm.mxc.thread.id.x", intrinsicTy);
+    auto bidFn = getOrCreateLLVMFn(module, "llvm.mxc.block.id.x", intrinsicTy);
+    auto bdimFn = getOrCreateLLVMFn(module, "llvm.mxc.block.dim.x", intrinsicTy);
+    auto barrierTy = LLVM::LLVMFunctionType::get(voidTy, {});
+    auto barrierFn = getOrCreateLLVMFn(module, "llvm.mxc.barrier", barrierTy);
 
     // Walk XCore1000 ops and convert to LLVM dialect
     for (Block &block : oldFunc.getBody()) {
       for (Operation &op : block) {
         // --- Thread ID ---
         if (auto tidOp = dyn_cast<xcore::ThreadIdOp>(&op)) {
-          // Call @llvm.mxc.thread.id.x() intrinsic
-          auto intrinsicTy = LLVM::LLVMFunctionType::get(i32Ty, {});
-          auto intrinsic = LLVM::lookupOrCreateFn(
-              module, "llvm.mxc.thread.id.x", {}, i32Ty);
           auto call = builder.create<LLVM::CallOp>(
-              op.getLoc(), i32Ty, SymbolRefAttr::get(intrinsic));
+              op.getLoc(), TypeRange{i32Ty}, SymbolRefAttr::get(tidFn));
           vmap[tidOp.getResult()] = call.getResult();
           continue;
         }
 
         // --- Block ID ---
         if (auto bidOp = dyn_cast<xcore::BlockIdOp>(&op)) {
-          auto intrinsic = LLVM::lookupOrCreateFn(
-              module, "llvm.mxc.block.id.x", {}, i32Ty);
           auto call = builder.create<LLVM::CallOp>(
-              op.getLoc(), i32Ty, SymbolRefAttr::get(intrinsic));
+              op.getLoc(), TypeRange{i32Ty}, SymbolRefAttr::get(bidFn));
           vmap[bidOp.getResult()] = call.getResult();
           continue;
         }
 
         // --- Block Dim ---
         if (auto bdimOp = dyn_cast<xcore::BlockDimOp>(&op)) {
-          auto intrinsic = LLVM::lookupOrCreateFn(
-              module, "llvm.mxc.block.dim.x", {}, i32Ty);
           auto call = builder.create<LLVM::CallOp>(
-              op.getLoc(), i32Ty, SymbolRefAttr::get(intrinsic));
+              op.getLoc(), TypeRange{i32Ty}, SymbolRefAttr::get(bdimFn));
           vmap[bdimOp.getResult()] = call.getResult();
           continue;
         }
@@ -221,11 +233,8 @@ bool lowerXCore1000ToLLVM(ModuleOp module) {
 
         // --- Barrier ---
         if (isa<xcore::BarrierOp>(&op)) {
-          // Call @llvm.mxc.barrier() intrinsic
-          auto intrinsic = LLVM::lookupOrCreateFn(
-              module, "llvm.mxc.barrier", {}, voidTy);
           builder.create<LLVM::CallOp>(
-              op.getLoc(), std::nullopt, SymbolRefAttr::get(intrinsic));
+              op.getLoc(), std::nullopt, SymbolRefAttr::get(barrierFn));
           continue;
         }
 

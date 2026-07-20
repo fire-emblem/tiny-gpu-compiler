@@ -2,7 +2,7 @@
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/OpImplementation.h"
-#include "mlir/IR/FunctionImplementation.h"
+#include "mlir/Interfaces/FunctionImplementation.h"
 
 using namespace mlir;
 using namespace mlir::xcore;
@@ -41,7 +41,7 @@ void FuncOp::print(OpAsmPrinter &p) {
 //===----------------------------------------------------------------------===//
 
 OpFoldResult ConstIOp::fold(FoldAdaptor adaptor) {
-  return adaptor.getValue();
+  return IntegerAttr::get(getType(), adaptor.getValue());
 }
 
 //===----------------------------------------------------------------------===//
@@ -49,5 +49,5 @@ OpFoldResult ConstIOp::fold(FoldAdaptor adaptor) {
 //===----------------------------------------------------------------------===//
 
 OpFoldResult ConstFOp::fold(FoldAdaptor adaptor) {
-  return adaptor.getValue();
+  return FloatAttr::get(getType(), adaptor.getValue());
 }

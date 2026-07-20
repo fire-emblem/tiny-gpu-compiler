@@ -3,7 +3,7 @@
 
 include "tiny-gpu-compiler/Dialect/XCore1000/XCore1000Dialect.td"
 include "mlir/IR/OpBase.td"
-include "mlir/IR/FunctionInterfaces.td"
+include "mlir/Interfaces/FunctionInterfaces.td"
 include "mlir/IR/SymbolInterfaces.td"
 include "mlir/Interfaces/CallInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
@@ -57,18 +57,33 @@ def XCore_ThreadIdOp : XCore_Op<"thread_id", [Pure]> {
   let summary = "Read thread index within block (masked to 10 bits)";
   let results = (outs I32:$result);
   let assemblyFormat = "attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins), [{
+      $_state.addTypes($_builder.getI32Type());
+    }]>
+  ];
 }
 
 def XCore_BlockIdOp : XCore_Op<"block_id", [Pure]> {
   let summary = "Read block index in grid";
   let results = (outs I32:$result);
   let assemblyFormat = "attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins), [{
+      $_state.addTypes($_builder.getI32Type());
+    }]>
+  ];
 }
 
 def XCore_BlockDimOp : XCore_Op<"block_dim", [Pure]> {
   let summary = "Read threads per block (blockDim)";
   let results = (outs I32:$result);
   let assemblyFormat = "attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins), [{
+      $_state.addTypes($_builder.getI32Type());
+    }]>
+  ];
 }
 
 //===----------------------------------------------------------------------===//
@@ -80,6 +95,12 @@ def XCore_AddIOp : XCore_Op<"addi", [Pure, Commutative]> {
   let arguments = (ins I32:$lhs, I32:$rhs);
   let results = (outs I32:$result);
   let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs), [{
+      $_state.addOperands({lhs, rhs});
+      $_state.addTypes(lhs.getType());
+    }]>
+  ];
 }
 
 def XCore_SubIOp : XCore_Op<"subi", [Pure]> {
@@ -87,6 +108,12 @@ def XCore_SubIOp : XCore_Op<"subi", [Pure]> {
   let arguments = (ins I32:$lhs, I32:$rhs);
   let results = (outs I32:$result);
   let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs), [{
+      $_state.addOperands({lhs, rhs});
+      $_state.addTypes(lhs.getType());
+    }]>
+  ];
 }
 
 def XCore_MulIOp : XCore_Op<"muli", [Pure, Commutative]> {
@@ -94,6 +121,12 @@ def XCore_MulIOp : XCore_Op<"muli", [Pure, Commutative]> {
   let arguments = (ins I32:$lhs, I32:$rhs);
   let results = (outs I32:$result);
   let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs), [{
+      $_state.addOperands({lhs, rhs});
+      $_state.addTypes(lhs.getType());
+    }]>
+  ];
 }
 
 def XCore_MulIHiOp : XCore_Op<"mulhi", [Pure, Commutative]> {
@@ -115,6 +148,12 @@ def XCore_DivIOp : XCore_Op<"divi", [Pure]> {
   let arguments = (ins I32:$lhs, I32:$rhs);
   let results = (outs I32:$result);
   let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs), [{
+      $_state.addOperands({lhs, rhs});
+      $_state.addTypes(lhs.getType());
+    }]>
+  ];
 }
 
 def XCore_RemIOp : XCore_Op<"remi", [Pure]> {
@@ -300,6 +339,17 @@ def XCore_ConstIOp : XCore_Op<"consti", [Pure, ConstantLike]> {
   let results = (outs I32:$result);
   let assemblyFormat = "$value attr-dict";
   let hasFolder = 1;
+  let builders = [
+    OpBuilder<(ins "int32_t":$value), [{
+      auto attr = IntegerAttr::get($_builder.getI32Type(), value);
+      $_state.addAttribute("value", attr);
+      $_state.addTypes($_builder.getI32Type());
+    }]>,
+    OpBuilder<(ins "IntegerAttr":$value), [{
+      $_state.addAttribute("value", value);
+      $_state.addTypes(value.getType());
+    }]>
+  ];
 }
 
 def XCore_ConstFOp : XCore_Op<"constf", [Pure, ConstantLike]> {
@@ -308,6 +358,13 @@ def XCore_ConstFOp : XCore_Op<"constf", [Pure, ConstantLike]> {
   let results = (outs F32:$result);
   let assemblyFormat = "$value attr-dict";
   let hasFolder = 1;
+  let builders = [
+    OpBuilder<(ins "float":$value), [{
+      auto attr = FloatAttr::get($_builder.getF32Type(), value);
+      $_state.addAttribute("value", attr);
+      $_state.addTypes($_builder.getF32Type());
+    }]>
+  ];
 }
 
 //===----------------------------------------------------------------------===//
@@ -324,6 +381,12 @@ def XCore_CmpIOp : XCore_Op<"cmpi", [Pure]> {
   let arguments = (ins I32:$lhs, I32:$rhs);
   let results = (outs I1:$result);
   let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs), [{
+      $_state.addOperands({lhs, rhs});
+      $_state.addTypes(IntegerType::get(lhs.getContext(), 1));
+    }]>
+  ];
 }
 
 def XCore_CmpFOp : XCore_Op<"cmpf", [Pure]> {
@@ -342,13 +405,14 @@ def XCore_CselOp : XCore_Op<"csel", [Pure]> {
 
 def XCore_BranchOp : XCore_Op<"branch", [Terminator]> {
   let summary = "Conditional branch based on scalar flag";
-  let arguments = (ins I1:$condition, AnySuccessor:$target);
+  let arguments = (ins I1:$condition);
+  let successors = (successor AnySuccessor:$target);
   let assemblyFormat = "$condition `,` $target attr-dict";
 }
 
 def XCore_JumpOp : XCore_Op<"jump", [Terminator]> {
   let summary = "Unconditional jump to target block";
-  let arguments = (ins AnySuccessor:$target);
+  let successors = (successor AnySuccessor:$target);
   let assemblyFormat = "$target attr-dict";
 }
 
@@ -363,7 +427,7 @@ def XCore_LoadGlobalOp : XCore_Op<"load_global"> {
     Maps to xcore1000 ldg_b32 instruction.
     The address is a 64-bit pointer passed via kernarg segment.
   }];
-  let arguments = (ins I64:$addr);
+  let arguments = (ins I32:$addr);
   let results = (outs I32:$result);
   let assemblyFormat = "$addr attr-dict `:` type($result)";
 }
@@ -374,20 +438,20 @@ def XCore_StoreGlobalOp : XCore_Op<"store_global"> {
     Stores a value to global device memory.
     Maps to xcore1000 stg_b32 ... devc instruction.
   }];
-  let arguments = (ins I64:$addr, I32:$value);
+  let arguments = (ins I32:$addr, I32:$value);
   let assemblyFormat = "$addr `,` $value attr-dict";
 }
 
 def XCore_LoadGlobalFOp : XCore_Op<"load_global_f"> {
   let summary = "Load float32 from global memory";
-  let arguments = (ins I64:$addr);
+  let arguments = (ins I32:$addr);
   let results = (outs F32:$result);
   let assemblyFormat = "$addr attr-dict `:` type($result)";
 }
 
 def XCore_StoreGlobalFOp : XCore_Op<"store_global_f"> {
   let summary = "Store float32 to global memory";
-  let arguments = (ins I64:$addr, F32:$value);
+  let arguments = (ins I32:$addr, F32:$value);
   let assemblyFormat = "$addr `,` $value attr-dict";
 }
 
@@ -435,7 +499,7 @@ def XCore_AtomicAddOp : XCore_Op<"atomic_add"> {
     Atomically adds a value to global memory.
     Maps to xcore1000 atom_global_add_i32 instruction.
   }];
-  let arguments = (ins I64:$addr, I32:$value);
+  let arguments = (ins I32:$addr, I32:$value);
   let results = (outs I32:$result);
   let assemblyFormat = "$addr `,` $value attr-dict `:` type($result)";
 }
@@ -452,6 +516,9 @@ def XCore_BarrierOp : XCore_Op<"barrier"> {
     Must be preceded by arrive bsmcnt(0) to ensure shared memory visibility.
   }];
   let assemblyFormat = "attr-dict";
+  let builders = [
+    OpBuilder<(ins), [{ /* no-op */ }]>
+  ];
 }
 
 //===----------------------------------------------------------------------===//
@@ -481,6 +548,9 @@ def XCore_ReturnOp : XCore_Op<"ret", [Terminator]> {
     Maps to xcore1000 endk instruction.
   }];
   let assemblyFormat = "attr-dict";
+  let builders = [
+    OpBuilder<(ins), [{ /* no-op */ }]>
+  ];
 }
 
 //===----------------------------------------------------------------------===//

@@ -32,7 +32,7 @@ std::string OptimizationStats::summary() const {
 /// Check if an operation is a tinygpu.const with a given value
 static bool isConstWithValue(Operation *op, uint8_t &val) {
   if (auto constOp = dyn_cast<tinygpu::ConstOp>(op)) {
-    val = constOp.getValue().getZExtValue();
+    val = constOp.getValue();
     return true;
   }
   return false;
@@ -238,7 +238,7 @@ int runCSE(Operation *funcOp) {
     for (Operation &op : block) {
       // CSE for const ops
       if (auto constOp = dyn_cast<tinygpu::ConstOp>(&op)) {
-        uint8_t val = constOp.getValue().getZExtValue();
+        uint8_t val = constOp.getValue();
         auto it = constCSE.find(val);
         if (it != constCSE.end()) {
           op.getResult(0).replaceAllUsesWith(it->second);
@@ -253,8 +253,10 @@ int runCSE(Operation *funcOp) {
       if (isa<tinygpu::AddOp, tinygpu::SubOp, tinygpu::MulOp,
               tinygpu::DivOp>(&op) &&
           op.getNumOperands() == 2) {
+        auto opId = op.getName().getTypeID().getAsOpaquePointer();
+        unsigned opIdInt = reinterpret_cast<uintptr_t>(opId);
         auto key = std::make_pair(
-            op.getName().getAsOpaquePointer(),
+            opIdInt,
             std::make_pair(op.getOperand(0), op.getOperand(1)));
         auto it = binaryCSE.find(key);
         if (it != binaryCSE.end()) {

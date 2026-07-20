@@ -12,6 +12,7 @@
 #include "mlir/IR/Verifier.h"
 
 #include "llvm/ADT/ScopedHashTable.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
@@ -55,7 +56,7 @@ private:
 
   // Shared memory base addresses (for shared int arrays)
   llvm::StringMap<int> sharedBaseAddrs;
-  llvm::StringSet<> sharedNames;
+  llvm::StringSet<llvm::MallocAllocator> sharedNames;
 
   // Owned strings for symbol table keys
   std::vector<std::unique_ptr<std::string>> ownedNames;
@@ -65,7 +66,7 @@ private:
     return *ownedNames.back();
   }
 
-  Location loc(tgc::Location l) {
+  mlir::Location loc(tgc::Location l) {
     return mlir::FileLineColLoc::get(builder.getStringAttr("<kernel>"), l.line,
                                      l.col);
   }
@@ -79,7 +80,8 @@ private:
     auto funcType = builder.getFunctionType({}, {});
     auto funcOp = builder.create<tinygpu::FuncOp>(loc(kernel.loc), kernel.name,
                                                    funcType);
-    Block *entryBlock = funcOp.addEntryBlock();
+    // buildWithEntryBlock already creates the entry block in MLIR 18
+    Block *entryBlock = &funcOp.getBody().front();
     builder.setInsertionPointToStart(entryBlock);
 
     // Map parameters to base addresses in data memory.

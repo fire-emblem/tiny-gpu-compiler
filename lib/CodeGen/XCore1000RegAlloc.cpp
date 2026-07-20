@@ -169,10 +169,14 @@ std::pair<int, int> getXCore1000RegPressure(Operation *funcOp) {
   int maxVgpr = 0, maxSgpr = 0;
 
   funcOp->walk([&](Operation *op) {
-    if (auto rd = op->getAttrOfType<IntegerAttr>("vgpr_rd"))
-      maxVgpr = std::max(maxVgpr, rd.getInt());
-    if (auto sd = op->getAttrOfType<IntegerAttr>("sgpr_sd"))
-      maxSgpr = std::max(maxSgpr, sd.getInt());
+    if (auto rd = op->getAttrOfType<IntegerAttr>("vgpr_rd")) {
+      int rdInt = static_cast<int>(rd.getInt());
+      if (rdInt > maxVgpr) maxVgpr = rdInt;
+    }
+    if (auto sd = op->getAttrOfType<IntegerAttr>("sgpr_sd")) {
+      int sdInt = static_cast<int>(sd.getInt());
+      if (sdInt > maxSgpr) maxSgpr = sdInt;
+    }
   });
 
   return {maxVgpr, maxSgpr};

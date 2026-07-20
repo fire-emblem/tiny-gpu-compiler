@@ -20,7 +20,6 @@ def XCore1000_Dialect : Dialect {
     - Global, shared, and private memory address spaces
   }];
   let cppNamespace = "::mlir::xcore";
-  let useDefaultTypePrinterParser = 1;
 }
 
 #endif // XCORE1000_DIALECT_TD

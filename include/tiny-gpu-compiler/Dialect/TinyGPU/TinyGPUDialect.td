@@ -22,7 +22,6 @@ def TinyGPU_Dialect : Dialect {
     - Barrier synchronization (__syncthreads) for shared memory coordination
   }];
   let cppNamespace = "::mlir::tinygpu";
-  let useDefaultTypePrinterParser = 1;
 }
 
 #endif // TINYGPU_DIALECT_TD

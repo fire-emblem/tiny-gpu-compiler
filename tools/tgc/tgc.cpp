@@ -57,7 +57,7 @@ int main(int argc, char **argv) {
   // Set up output
   std::error_code ec;
   auto output = std::make_unique<ToolOutputFile>(outputFilename, ec,
-                                                  sys::fs::OF_None);
+                                                  static_cast<llvm::sys::fs::OpenFlags>(0));
   if (ec) {
     errs() << "Error opening output: " << ec.message() << "\n";
     return 1;

@@ -19,6 +19,8 @@
 
 using namespace mlir;
 
+namespace tgc {
+
 /// Capture the current module IR as a string.
 static std::string captureIR(ModuleOp module) {
   std::string ir;
@@ -28,15 +30,12 @@ static std::string captureIR(ModuleOp module) {
 }
 
 /// Analyze the compiled instructions for divergence and coalescing patterns.
-static void analyzeInstructions(CompilationTrace &trace) {
+static void analyzeInstructions(tgc::CompilationTrace &trace) {
   auto &analysis = trace.analysis;
   analysis.totalInstructions = trace.instructions.size();
 
   for (auto &inst : trace.instructions) {
-    uint16_t binary = 0;
-    if (inst.hex.size() >= 4) {
-      binary = std::stoi(inst.hex.substr(2), nullptr, 16);
-    }
+    uint16_t binary = inst.binary;
     uint16_t opcode = (binary >> 12) & 0xF;
 
     switch (opcode) {

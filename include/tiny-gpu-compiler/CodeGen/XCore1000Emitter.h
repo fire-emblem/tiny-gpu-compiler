@@ -2,6 +2,7 @@
 #define XCORE1000_EMITTER_H
 
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Operation.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <string>
@@ -32,10 +33,10 @@ struct XCore1000KernelMeta {
 };
 
 /// Emit xcore1000 assembly for a kernel function
-void emitXCore1000Assembly(Operation *funcOp, llvm::raw_ostream &os);
+void emitXCore1000Assembly(mlir::Operation *funcOp, llvm::raw_ostream &os);
 
 /// Emit xcore1000 assembly as a vector of instructions
-std::vector<XCore1000Instruction> emitXCore1000(Operation *funcOp);
+std::vector<XCore1000Instruction> emitXCore1000(mlir::Operation *funcOp);
 
 /// Emit kernel metadata
 void emitKernelMeta(const XCore1000KernelMeta &meta, llvm::raw_ostream &os);

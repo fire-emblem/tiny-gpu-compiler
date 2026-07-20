@@ -3,7 +3,7 @@
 
 include "tiny-gpu-compiler/Dialect/TinyGPU/TinyGPUDialect.td"
 include "mlir/IR/OpBase.td"
-include "mlir/IR/FunctionInterfaces.td"
+include "mlir/Interfaces/FunctionInterfaces.td"
 include "mlir/IR/SymbolInterfaces.td"
 include "mlir/Interfaces/CallInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
@@ -60,18 +60,33 @@ def TinyGPU_ThreadIdOp : TinyGPU_Op<"thread_id", [Pure]> {
   let summary = "Read thread index within block (R15)";
   let results = (outs I8:$result);
   let assemblyFormat = "attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins), [{
+      $_state.addTypes($_builder.getI8Type());
+    }]>
+  ];
 }
 
 def TinyGPU_BlockIdOp : TinyGPU_Op<"block_id", [Pure]> {
   let summary = "Read block index (R13)";
   let results = (outs I8:$result);
   let assemblyFormat = "attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins), [{
+      $_state.addTypes($_builder.getI8Type());
+    }]>
+  ];
 }
 
 def TinyGPU_BlockDimOp : TinyGPU_Op<"block_dim", [Pure]> {
   let summary = "Read threads per block (R14)";
   let results = (outs I8:$result);
   let assemblyFormat = "attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins), [{
+      $_state.addTypes($_builder.getI8Type());
+    }]>
+  ];
 }
 
 //===----------------------------------------------------------------------===//
@@ -83,6 +98,12 @@ def TinyGPU_AddOp : TinyGPU_Op<"add", [Pure, Commutative]> {
   let arguments = (ins I8:$lhs, I8:$rhs);
   let results = (outs I8:$result);
   let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs), [{
+      $_state.addOperands({lhs, rhs});
+      $_state.addTypes(lhs.getType());
+    }]>
+  ];
 }
 
 def TinyGPU_SubOp : TinyGPU_Op<"sub", [Pure]> {
@@ -90,6 +111,12 @@ def TinyGPU_SubOp : TinyGPU_Op<"sub", [Pure]> {
   let arguments = (ins I8:$lhs, I8:$rhs);
   let results = (outs I8:$result);
   let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs), [{
+      $_state.addOperands({lhs, rhs});
+      $_state.addTypes(lhs.getType());
+    }]>
+  ];
 }
 
 def TinyGPU_MulOp : TinyGPU_Op<"mul", [Pure, Commutative]> {
@@ -97,6 +124,12 @@ def TinyGPU_MulOp : TinyGPU_Op<"mul", [Pure, Commutative]> {
   let arguments = (ins I8:$lhs, I8:$rhs);
   let results = (outs I8:$result);
   let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs), [{
+      $_state.addOperands({lhs, rhs});
+      $_state.addTypes(lhs.getType());
+    }]>
+  ];
 }
 
 def TinyGPU_DivOp : TinyGPU_Op<"div", [Pure]> {
@@ -104,6 +137,12 @@ def TinyGPU_DivOp : TinyGPU_Op<"div", [Pure]> {
   let arguments = (ins I8:$lhs, I8:$rhs);
   let results = (outs I8:$result);
   let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs), [{
+      $_state.addOperands({lhs, rhs});
+      $_state.addTypes(lhs.getType());
+    }]>
+  ];
 }
 
 //===----------------------------------------------------------------------===//
@@ -119,6 +158,12 @@ def TinyGPU_LoadOp : TinyGPU_Op<"load"> {
   let arguments = (ins I8:$addr);
   let results = (outs I8:$result);
   let assemblyFormat = "$addr attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins "Value":$addr), [{
+      $_state.addOperands(addr);
+      $_state.addTypes(addr.getType());
+    }]>
+  ];
 }
 
 def TinyGPU_StoreOp : TinyGPU_Op<"store"> {
@@ -142,6 +187,13 @@ def TinyGPU_ConstOp : TinyGPU_Op<"const", [Pure, ConstantLike]> {
   let assemblyFormat = "$value attr-dict";
 
   let hasFolder = 1;
+  let builders = [
+    OpBuilder<(ins "uint8_t":$value), [{
+      auto attr = IntegerAttr::get($_builder.getI8Type(), value);
+      $_state.addAttribute("value", attr);
+      $_state.addTypes($_builder.getI8Type());
+    }]>
+  ];
 }
 
 //===----------------------------------------------------------------------===//
@@ -160,6 +212,12 @@ def TinyGPU_CmpOp : TinyGPU_Op<"cmp", [Pure]> {
   let arguments = (ins I8:$lhs, I8:$rhs);
   let results = (outs I8:$nzp);
   let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($nzp)";
+  let builders = [
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs), [{
+      $_state.addOperands({lhs, rhs});
+      $_state.addTypes(lhs.getType());
+    }]>
+  ];
 }
 
 def TinyGPU_BranchOp : TinyGPU_Op<"branch", [Terminator]> {
@@ -169,7 +227,8 @@ def TinyGPU_BranchOp : TinyGPU_Op<"branch", [Terminator]> {
     The condition_mask is a 3-bit value selecting which NZP flags to test.
     Maps to the BRnzp instruction.
   }];
-  let arguments = (ins I8:$nzp, I8Attr:$condition_mask, AnySuccessor:$target);
+  let arguments = (ins I8:$nzp, I8Attr:$condition_mask);
+  let successors = (successor AnySuccessor:$target);
   let assemblyFormat = "$nzp `,` $condition_mask `,` $target attr-dict";
 }
 
@@ -184,6 +243,9 @@ def TinyGPU_ReturnOp : TinyGPU_Op<"ret", [Terminator]> {
     Maps to the RET instruction.
   }];
   let assemblyFormat = "attr-dict";
+  let builders = [
+    OpBuilder<(ins), [{ /* no-op */ }]>
+  ];
 }
 
 //===----------------------------------------------------------------------===//
@@ -195,7 +257,7 @@ def TinyGPU_JumpOp : TinyGPU_Op<"jump", [Terminator]> {
   let description = [{
     Unconditional branch. Lowered to BRnzp with condition_mask=0b111 (always taken).
   }];
-  let arguments = (ins AnySuccessor:$target);
+  let successors = (successor AnySuccessor:$target);
   let assemblyFormat = "$target attr-dict";
 }
 
@@ -213,6 +275,12 @@ def TinyGPU_SharedLoadOp : TinyGPU_Op<"shared_load"> {
   let arguments = (ins I8:$addr);
   let results = (outs I8:$result);
   let assemblyFormat = "$addr attr-dict `:` type($result)";
+  let builders = [
+    OpBuilder<(ins "Value":$addr), [{
+      $_state.addOperands(addr);
+      $_state.addTypes(addr.getType());
+    }]>
+  ];
 }
 
 def TinyGPU_SharedStoreOp : TinyGPU_Op<"shared_store"> {
@@ -235,6 +303,9 @@ def TinyGPU_BarrierOp : TinyGPU_Op<"barrier"> {
     Maps to the BAR instruction (opcode 1100).
   }];
   let assemblyFormat = "attr-dict";
+  let builders = [
+    OpBuilder<(ins), [{ /* no-op */ }]>
+  ];
 }
 
 #endif // TINYGPU_OPS_TD
