@@ -1,0 +1,14 @@
+// RUN: %tgc --target xcore1000 --emit asm %s | FileCheck %s
+
+// CHECK: cmp_lt_i32
+// CHECK: endk
+
+kernel relu(global int* out, global int* in) {
+    int idx = blockIdx * blockDim + threadIdx;
+    int val = in[idx];
+    if (val > 0) {
+        out[idx] = val;
+    } else {
+        out[idx] = 0;
+    }
+}

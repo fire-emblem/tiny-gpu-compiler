@@ -1,0 +1,12 @@
+// RUN: %tgc --target xcore1000 --emit cu %s | FileCheck %s
+
+// CHECK: __global__ void vector_add
+// CHECK: float*
+// CHECK: blockIdx.x
+// CHECK: blockDim.x
+// CHECK: threadIdx.x
+
+kernel vector_add(global float* a, global float* b, global float* c) {
+    int idx = blockIdx * blockDim + threadIdx;
+    c[idx] = a[idx] + b[idx];
+}

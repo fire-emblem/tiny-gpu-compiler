@@ -1,0 +1,13 @@
+// RUN: %tgc --target xcore1000 --emit asm %s | FileCheck %s
+
+// CHECK: add_u32
+// CHECK: sub_u32
+// CHECK: mul_u32
+// CHECK: endk
+
+kernel int_arith(global int* out, int a, int b) {
+    int i = threadIdx;
+    out[i] = a + b;
+    out[i+1] = a - b;
+    out[i+2] = a * b;
+}

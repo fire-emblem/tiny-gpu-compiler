@@ -1,0 +1,19 @@
+// RUN: %tgc --target xcore1000 --emit asm %s | FileCheck %s
+
+// CHECK: vector_add
+// CHECK: ldu_b128
+// CHECK: arrive slcnt
+// CHECK: ldu_b32
+// CHECK: mul_u32
+// CHECK: and_b32
+// CHECK: add_u32
+// CHECK: ldg_b32
+// CHECK: arrive gvmcnt
+// CHECK: stg_b32
+// CHECK: endk
+// CHECK: .macahca_kernel
+
+kernel vector_add(global float* a, global float* b, global float* c) {
+    int idx = blockIdx * blockDim + threadIdx;
+    c[idx] = a[idx] + b[idx];
+}

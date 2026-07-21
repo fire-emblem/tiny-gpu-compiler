@@ -1,0 +1,12 @@
+// RUN: %tgc --target xcore1000 --emit asm %s | FileCheck %s
+
+// CHECK: add_u32
+// CHECK: mul_u32
+// CHECK: stg_b32
+// CHECK: endk
+
+kernel float_ops(global float* out, float a, float b) {
+    int i = threadIdx;
+    out[i] = a + b;
+    out[i+1] = a * b;
+}

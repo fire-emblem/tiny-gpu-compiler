@@ -1,0 +1,12 @@
+// RUN: %tgc --target xcore1000 --emit asm %s | FileCheck %s
+
+// CHECK: .macahca_kernel
+// CHECK: .macahca_mtreg_size
+// CHECK: .macahca_streg_size
+// CHECK: .macahca_ieee_mode 1
+// CHECK: .macahca_warps_per_dpc 416
+// CHECK: .end_macahca_kernel
+
+kernel simple(global int* out) {
+    out[threadIdx] = threadIdx;
+}

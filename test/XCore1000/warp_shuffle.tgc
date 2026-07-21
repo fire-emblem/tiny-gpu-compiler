@@ -1,0 +1,9 @@
+// RUN: %tgc --target xcore1000 --emit asm %s | FileCheck %s
+
+// CHECK: ldg_b32
+// CHECK: endk
+
+kernel shuffle_test(global int* out, global int* in) {
+    int v = in[threadIdx];
+    out[threadIdx] = v;
+}

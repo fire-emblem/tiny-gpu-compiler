@@ -1,0 +1,15 @@
+// RUN: %tgc --target xcore1000 --emit asm %s | FileCheck %s
+
+// CHECK: sts_b32
+// CHECK: barrier
+// CHECK: endk
+
+kernel shared_reduce(global int* input, global int* output) {
+    shared int scratch[4];
+    int idx = blockIdx * blockDim + threadIdx;
+    scratch[threadIdx] = input[idx];
+    __syncthreads();
+    if (threadIdx < 1) {
+        output[blockIdx] = scratch[0];
+    }
+}
