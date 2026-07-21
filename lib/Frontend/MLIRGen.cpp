@@ -245,6 +245,34 @@ private:
   }
 
   LogicalResult genFor(const ForStmt &stmt) {
+    // Scan body for variable assignments to detect loop-carried values.
+    // These values are modified inside the loop body and used after the loop.
+    // In SSA form, values from bodyBlock don't dominate exitBlock.
+    // Fix: store loop-carried values to memory, reload after loop.
+    llvm::StringSet<> loopModifiedVars;
+    for (auto &s : stmt.body) {
+      if (s->kind == StmtKind::Assignment) {
+        auto &assign = static_cast<const AssignmentStmt &>(*s);
+        loopModifiedVars.insert(assign.name);
+      }
+    }
+
+    // For each loop-carried variable, allocate a memory slot (address 192+)
+    // and store the initial value before the loop.
+    llvm::StringMap<int> loopMemSlots;
+    int nextSlot = 192; // After scalar params
+    for (auto &entry : loopModifiedVars) {
+      std::string varName = entry.getKey().str();
+      auto it = symbolTable.lookup(varName);
+      if (it) {
+        loopMemSlots[varName] = nextSlot;
+        auto addrVal = builder.create<tinygpu::ConstOp>(loc(stmt.loc),
+                                                         (uint8_t)nextSlot);
+        builder.create<tinygpu::StoreOp>(loc(stmt.loc), addrVal, it);
+        nextSlot++;
+      }
+    }
+
     // Generate init
     if (failed(genVarDecl(*stmt.init)))
       return failure();
@@ -264,11 +292,19 @@ private:
 
     // Condition block: evaluate condition, branch
     builder.setInsertionPointToStart(condBlock);
+
+    // Reload loop-carried variables from memory at start of each iteration
+    for (auto &entry : loopMemSlots) {
+      auto addrVal = builder.create<tinygpu::ConstOp>(loc(stmt.loc),
+                                                       (uint8_t)entry.second);
+      auto loaded = builder.create<tinygpu::LoadOp>(loc(stmt.loc), addrVal);
+      symbolTable.insert(ownName(entry.getKey().str()), loaded);
+    }
+
     auto condVal = genExpr(*stmt.condition);
     if (!condVal)
       return failure();
 
-    // If condition is already a CmpOp result, use it directly.
     Value nzp;
     if (auto cmpDefiningOp = condVal.getDefiningOp();
         cmpDefiningOp && isa<tinygpu::CmpOp>(cmpDefiningOp)) {
@@ -287,6 +323,16 @@ private:
         return failure();
     }
 
+    // Store loop-carried variables back to memory at end of each iteration
+    for (auto &entry : loopMemSlots) {
+      auto val = symbolTable.lookup(entry.getKey().str());
+      if (val) {
+        auto addrVal = builder.create<tinygpu::ConstOp>(loc(stmt.loc),
+                                                         (uint8_t)entry.second);
+        builder.create<tinygpu::StoreOp>(loc(stmt.loc), addrVal, val);
+      }
+    }
+
     // Update iterator
     auto updateVal = genExpr(*stmt.iterUpdate);
     if (!updateVal)
@@ -298,6 +344,15 @@ private:
 
     // Continue in exit block
     builder.setInsertionPointToStart(exitBlock);
+
+    // Reload loop-carried variables from memory into exit block
+    for (auto &entry : loopMemSlots) {
+      auto addrVal = builder.create<tinygpu::ConstOp>(loc(stmt.loc),
+                                                       (uint8_t)entry.second);
+      auto loaded = builder.create<tinygpu::LoadOp>(loc(stmt.loc), addrVal);
+      symbolTable.insert(ownName(entry.getKey().str()), loaded);
+    }
+
     return success();
   }
 
